@@ -1,5 +1,3 @@
-# 🜂 AETHORIA: ETERNAL REALMS
-
 <div align="center">
 
 ```
@@ -9,180 +7,120 @@
 ██╔══██║██╔══╝     ██║   ██╔══██║██║   ██║██╔══██╗██║██╔══██║
 ██║  ██║███████╗   ██║   ██║  ██║╚██████╔╝██║  ██║██║██║  ██║
 ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
+                    E T E R N A L   R E A L M S
 ```
 
-### ⚔️ AAA-STYLE CUSTOM MMORPG ENGINE
+# ⚔️ AETHORIA ENGINE
 
-**No Unity • No Unreal • No middleware**
+### Handcrafted MMORPG Engine — Built From Scratch
 
-🌍 **Languages:** [🇺🇸 English](#-overview) • [🇷🇺 Русский](#-обзор)
+_No Unity • No Unreal • No middleware_
 
-<br>
+🌍 Languages: [🇺🇸 English](#-overview) • [🇷🇺 Русский](#-обзор)
 
-![Build](https://img.shields.io/badge/build-passing-brightgreen)
 ![C++](https://img.shields.io/badge/C++-17-blue)
-![Engine](https://img.shields.io/badge/engine-custom-purple)
-![Status](https://img.shields.io/badge/status-active-success)
+![SFML](https://img.shields.io/badge/SFML-2.6.1-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
+![Status](https://img.shields.io/badge/status-active-success)
 
 </div>
 
 ---
 
-## 🎥 DEMO
+## 🎥 Demo
 
-> 🔥 Replace with real gameplay
-
-![Gameplay](docs/demo.gif)
-
----
-
-## 🧭 TABLE OF CONTENTS
-
-- [Overview](#-overview)
-- [Philosophy](#-design-philosophy)
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Showcase](#-showcase)
-- [Getting Started](#-quick-start)
-- [Editor](#-world-editor)
-- [Roadmap](#-roadmap)
-- [Русский](#-обзор)
+> Add `docs/demo.gif` — this is critical for AAA presentation
 
 ---
 
 # ✨ Overview
 
-**Aethoria** is a fully handcrafted MMORPG engine built entirely from scratch.
+**Aethoria: Eternal Realms** is a fully custom MMORPG engine and editor.
 
-> This is not a wrapper.  
+Every system is written manually:
+- rendering
+- AI
+- animation
+- world logic
+
 > This is not a framework.  
-> This is the engine itself.
+> This is a real engine.
 
 ---
 
-## 🧠 DESIGN PHILOSOPHY
+## 🎮 Features
 
-- ❌ No hidden systems  
-- ❌ No engine magic  
-- ❌ No external dependency hell  
+### Engine
+- ⚔ Real-time combat
+- 👾 AI states
+- 🗺 Tile world
+- 🎬 Animation system
+- 🔊 Audio
+- 🌐 Scene system
+- 💾 Save/load
 
-- ✅ Full control  
-- ✅ Full ownership  
-- ✅ Full transparency  
-
----
-
-## ✨ FEATURES
-
-### ⚔ Engine
-- Real-time combat system
-- AI state machines
-- Scene system
-- Entity abstraction layer
-- Animation pipeline
-- Audio system
-- JSON architecture
-- Particle effects
-
-### 🛠 Editor
-- Visual world builder
-- Dialogue system
-- Quest editor
-- Prefab system
-- Live sync
-- UI config tools
+### Editor
+- 🖌 Map editor
+- 👺 NPC placement
+- 📦 Prefabs
+- 🎭 Dialogue system
+- 🔄 Auto-sync
 
 ---
 
-## 🏗 ARCHITECTURE
+## 🏗 Architecture
 
 ```
 ENGINE
-├── Scene System
-├── Entity System
-├── Animation System
+├── Scene
+├── Entity
+├── Animation
 ├── Audio
-└── Core Loop
+└── Core
 
-EDITOR
-└── Live Sync → JSON → Engine
+EDITOR → JSON → ENGINE
 ```
 
 ---
 
-## 📸 SHOWCASE
-
-| Editor | Gameplay |
-|--------|---------|
-| ![](docs/editor.png) | ![](docs/game.png) |
-
----
-
-## ⚡ QUICK START
+## 🔨 Build
 
 ```bash
-git clone <repo>
-cd aethoria
 ./build.sh
 ```
 
 ---
 
-## 🗺 WORLD EDITOR
+# 🇷🇺 Обзор
 
-```bash
-python editor/aethoria_editor3.py
-```
+## ✨ Описание
 
-✔ Instant sync  
-✔ Scene export  
-✔ No restart workflow  
+Aethoria — полностью самописный MMORPG-движок.
 
----
-
-## 🗺 ROADMAP
-
-- [x] Engine
-- [x] Editor
-- [x] Prefabs
-- [ ] Multiplayer
-- [ ] Hot reload
-- [ ] Asset system
-- [ ] Procedural generation
+Без готовых решений.  
+Полный контроль над системой.
 
 ---
 
-# 🇷🇺 ОБЗОР
-
-## 🔥 Что это
-
-Полностью самописный MMORPG-движок.
-
-## 💡 Идея
-
-Показать реальную архитектуру движка без готовых решений.
-
-## ⚙️ Возможности
+## 🎮 Возможности
 
 - ⚔ Боевая система  
 - 👾 AI  
 - 🗺 Мир  
 - 🎬 Анимации  
+- 🔊 Звук  
 - 🛠 Редактор  
 
 ---
 
-## 📜 LICENSE
+## 📜 License
 
-Proprietary
+See [LICENSE](LICENSE)
 
 ---
 
 <div align="center">
 
-# ⚡ BUILT DIFFERENT
-
-**This is what real engine development looks like.**
+### ⚡ BUILT FROM SCRATCH
 
 </div>

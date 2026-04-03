@@ -1,0 +1,32 @@
+AETHORIA: ETERNAL REALMS — PROPRIETARY LICENSE
+===============================================================================
+
+Copyright (c) 2025 PapaZ. All Rights Reserved.
+
+TERMS AND CONDITIONS
+
+1. VIEWING ONLY
+This source code is provided strictly for viewing and educational purposes.
+Studying architecture and concepts is permitted.
+
+2. PROHIBITED ACTIONS
+Without explicit written permission:
+
+- Copying any part of the code
+- Modifying or creating derivatives
+- Redistributing
+- Using in any project (commercial or non-commercial)
+- Sublicensing or transferring rights
+
+3. NO WARRANTY
+Provided "AS IS" without warranty.
+
+4. CONTACT
+Contact via GitHub.
+
+5. ENFORCEMENT
+Violations may result in legal action.
+
+===============================================================================
+ALL RIGHTS RESERVED
+===============================================================================
