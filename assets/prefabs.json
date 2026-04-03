@@ -1,1 +1,72 @@
-{}
+{
+  "custom": [
+    {
+      "id": "pfb_custom_73375048",
+      "name": "Волк (альфа) (копия)",
+      "category": "custom",
+      "kind": "enemy",
+      "type": "WOLF",
+      "emoji": "🐺",
+      "props": {
+        "level": 6,
+        "boss": true,
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
+      }
+    },
+    {
+      "id": "pfb_custom_73380424",
+      "name": "Волк (альфа) (копия) (копия)",
+      "category": "custom",
+      "kind": "enemy",
+      "type": "WOLF",
+      "emoji": "🐺",
+      "props": {
+        "level": 6,
+        "boss": true,
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
+      }
+    },
+    {
+      "id": "pfb_custom_73381088",
+      "name": "Волк (альфа) (копия) (копия) (копия)",
+      "category": "custom",
+      "kind": "enemy",
+      "type": "WOLF",
+      "emoji": "🐺",
+      "props": {
+        "level": 6,
+        "boss": true,
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
+      }
+    },
+    {
+      "id": "pfb_custom_73381584",
+      "name": "Волк (альфа) (копия) (копия) (копия) (копия)",
+      "category": "custom",
+      "kind": "enemy",
+      "type": "WOLF",
+      "emoji": "🐺",
+      "props": {
+        "level": 6,
+        "boss": true,
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
+      }
+    }
+  ]
+}

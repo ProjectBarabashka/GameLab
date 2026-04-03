@@ -147,5 +147,32 @@
       ]
     },
     "active": true
+  },
+  {
+    "id": "q004",
+    "name": "TEST",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "Квестодатель",
+    "description": "TEST",
+    "objectives": [],
+    "rewards": {
+      "gold_min": 10,
+      "gold_max": 50,
+      "xp": 100,
+      "items": []
+    },
+    "dialogue": {
+      "offer": [
+        "..."
+      ],
+      "progress": [
+        "..."
+      ],
+      "complete": [
+        "Отлично!"
+      ]
+    },
+    "active": true
   }
 ]

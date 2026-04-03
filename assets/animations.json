@@ -26,14 +26,14 @@
   "wolf": {
     "idle": {
       "sheet": "textures/sprites/wolf_idle.png",
-      "frames": 87,
+      "frames": 60,
       "cols": 8,
-      "rows": 11,
+      "rows": 8,
       "width": 64,
       "height": 64,
       "fps": 30,
       "loop": true,
-      "source": "Airbrush-video-background-remover-preview-1774894437501.mp4"
+      "source": "624b29c365ed46caabcfe890499fa66c.mp4"
     }
   }
 }

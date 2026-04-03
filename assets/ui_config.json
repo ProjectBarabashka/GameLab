@@ -105,8 +105,8 @@
     "hp_bar_color": "#cc3232",
     "mp_bar_color": "#3264cc",
     "xp_bar_color": "#44cc44",
-    "skill_slots": 4,
-    "chat_lines": 5,
+    "skill_slots": 6,
+    "chat_lines": 10,
     "show_minimap": true,
     "show_level": true,
     "show_gold": true

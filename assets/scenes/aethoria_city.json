@@ -1,6 +1,6 @@
 {
   "version": "4.0",
-  "name": "Aethoria World",
+  "name": "Aethoria City",
   "width": 120,
   "height": 120,
   "metadata": {
@@ -8,7 +8,8 @@
     "city_cy": 60,
     "city_radius": 18,
     "player_spawn_x": 60,
-    "player_spawn_y": 55
+    "player_spawn_y": 55,
+    "scene_id": "aethoria_city"
   },
   "tiles": [
     [
@@ -3003,7 +3004,7 @@
       "ROAD",
       "GRASS",
       "GRASS",
-      "TREE",
+      "GRASS",
       "GRASS",
       "GRASS",
       "GRASS",
@@ -5922,7 +5923,7 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "STONE_FLOOR",
+      "CHEST",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -6535,12 +6536,12 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "ROAD",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -6657,12 +6658,12 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "ROAD",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -6779,12 +6780,12 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "ROAD",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -6901,12 +6902,12 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "ROAD",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -7023,12 +7024,12 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
-      "BUILDING_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
+      "ROAD",
+      "STONE_FLOOR",
+      "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -7146,11 +7147,11 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "STONE_FLOOR",
-      "STONE_FLOOR",
-      "ROAD",
-      "STONE_FLOOR",
-      "STONE_FLOOR",
+      "WALL",
+      "WALL",
+      "WALL",
+      "WALL",
+      "WALL",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -7268,11 +7269,11 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "STONE_FLOOR",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "STONE_FLOOR",
+      "WALL",
+      "WATER",
+      "WATER",
+      "WATER",
+      "WALL",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -7390,11 +7391,11 @@
       "ROAD",
       "ROAD",
       "ROAD",
-      "ROAD",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "ROAD",
+      "WALL",
+      "WATER",
+      "WATER",
+      "WATER",
+      "WALL",
       "ROAD",
       "ROAD",
       "ROAD",
@@ -7512,11 +7513,11 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "STONE_FLOOR",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "FOUNTAIN",
-      "STONE_FLOOR",
+      "WALL",
+      "WATER",
+      "WATER",
+      "WATER",
+      "WALL",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -7634,11 +7635,11 @@
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
-      "STONE_FLOOR",
-      "STONE_FLOOR",
-      "ROAD",
-      "STONE_FLOOR",
-      "STONE_FLOOR",
+      "WALL",
+      "WALL",
+      "WALL",
+      "WALL",
+      "WALL",
       "STONE_FLOOR",
       "STONE_FLOOR",
       "STONE_FLOOR",
@@ -17645,7 +17646,7 @@
       0,
       0,
       0,
-      1,
+      0,
       0,
       0,
       0,
@@ -20564,7 +20565,7 @@
       0,
       0,
       0,
-      0,
+      1,
       0,
       0,
       0,
@@ -21177,12 +21178,12 @@
       0,
       0,
       0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -21299,12 +21300,12 @@
       0,
       0,
       0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -21421,12 +21422,12 @@
       0,
       0,
       0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -21543,12 +21544,12 @@
       0,
       0,
       0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -21665,12 +21666,12 @@
       0,
       0,
       0,
-      1,
-      1,
-      1,
-      1,
-      1,
-      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -21788,11 +21789,11 @@
       0,
       0,
       0,
-      0,
-      0,
-      0,
-      0,
-      0,
+      1,
+      1,
+      1,
+      1,
+      1,
       0,
       0,
       0,
@@ -21910,11 +21911,11 @@
       0,
       0,
       0,
-      0,
-      0,
-      0,
-      0,
-      0,
+      1,
+      1,
+      1,
+      1,
+      1,
       0,
       0,
       0,
@@ -22032,11 +22033,11 @@
       0,
       0,
       0,
-      0,
-      0,
-      0,
-      0,
-      0,
+      1,
+      1,
+      1,
+      1,
+      1,
       0,
       0,
       0,
@@ -22154,11 +22155,11 @@
       0,
       0,
       0,
-      0,
-      0,
-      0,
-      0,
-      0,
+      1,
+      1,
+      1,
+      1,
+      1,
       0,
       0,
       0,
@@ -22276,11 +22277,11 @@
       0,
       0,
       0,
-      0,
-      0,
-      0,
-      0,
-      0,
+      1,
+      1,
+      1,
+      1,
+      1,
       0,
       0,
       0,
@@ -29296,90 +29297,13 @@
   ],
   "entities": [
     {
-      "id": "n0001",
-      "kind": "npc",
-      "type": "VENDOR",
-      "x": 52,
-      "y": 56,
-      "props": {
-        "name": "Торговец Алар",
-        "quest_id": null
-      }
-    },
-    {
-      "id": "n0002",
-      "kind": "npc",
-      "type": "QUEST",
-      "x": 63,
-      "y": 52,
-      "props": {
-        "name": "Капитан Грэй",
-        "quest_id": "q001"
-      }
-    },
-    {
-      "id": "n0003",
-      "kind": "npc",
-      "type": "HEALER",
-      "x": 55,
-      "y": 64,
-      "props": {
-        "name": "Жрица Элара",
-        "quest_id": null
-      }
-    },
-    {
-      "id": "n0004",
-      "kind": "npc",
-      "type": "BLACKSMITH",
-      "x": 66,
-      "y": 63,
-      "props": {
-        "name": "Кузнец Борг",
-        "quest_id": null
-      }
-    },
-    {
-      "id": "n0005",
-      "kind": "npc",
-      "type": "INNKEEPER",
-      "x": 58,
-      "y": 66,
-      "props": {
-        "name": "Трактирщик Дун",
-        "quest_id": null
-      }
-    },
-    {
-      "id": "n0006",
-      "kind": "npc",
-      "type": "GUARD",
-      "x": 45,
-      "y": 60,
-      "props": {
-        "name": "Стражник",
-        "quest_id": null
-      }
-    },
-    {
-      "id": "n0007",
-      "kind": "npc",
-      "type": "GUARD",
-      "x": 75,
-      "y": 60,
-      "props": {
-        "name": "Стражник",
-        "quest_id": null
-      }
-    },
-    {
       "id": "z0001",
       "kind": "zone",
       "type": "SPAWN",
-      "x": 60,
-      "y": 56,
+      "x": 59,
+      "y": 49,
       "props": {
-        "radius": 3
+        "radius": 1
       }
     },
     {
@@ -29389,15 +29313,15 @@
       "x": 60,
       "y": 60,
       "props": {
-        "radius": 18
+        "radius": 20
       }
     },
     {
       "id": "e0001",
       "kind": "enemy",
       "type": "GOBLIN",
-      "x": 27,
-      "y": 78,
+      "x": 36,
+      "y": 36,
       "props": {
         "level": 1,
         "boss": false,
@@ -29408,9 +29332,9 @@
     {
       "id": "e0002",
       "kind": "enemy",
-      "type": "TROLL",
-      "x": 24,
-      "y": 31,
+      "type": "GOBLIN",
+      "x": 36,
+      "y": 35,
       "props": {
         "level": 1,
         "boss": false,
@@ -29421,9 +29345,9 @@
     {
       "id": "e0003",
       "kind": "enemy",
-      "type": "BANDIT",
-      "x": 33,
-      "y": 19,
+      "type": "GOBLIN",
+      "x": 41,
+      "y": 35,
       "props": {
         "level": 1,
         "boss": false,
@@ -29434,9 +29358,9 @@
     {
       "id": "e0004",
       "kind": "enemy",
-      "type": "WOLF",
-      "x": 99,
-      "y": 13,
+      "type": "GOBLIN",
+      "x": 56,
+      "y": 33,
       "props": {
         "level": 1,
         "boss": false,
@@ -29447,52 +29371,52 @@
     {
       "id": "e0005",
       "kind": "enemy",
-      "type": "SKELETON",
-      "x": 34,
-      "y": 95,
+      "type": "BANDIT",
+      "x": 35,
+      "y": 38,
       "props": {
-        "level": 2,
+        "level": 1,
         "boss": false,
-        "hp": 60,
-        "dmg": 9
+        "hp": 55,
+        "dmg": 10
       }
     },
     {
       "id": "e0006",
       "kind": "enemy",
-      "type": "GOBLIN",
-      "x": 89,
-      "y": 91,
+      "type": "BANDIT",
+      "x": 35,
+      "y": 44,
       "props": {
-        "level": 2,
+        "level": 1,
         "boss": false,
-        "hp": 60,
-        "dmg": 9
+        "hp": 55,
+        "dmg": 10
       }
     },
     {
       "id": "e0007",
       "kind": "enemy",
-      "type": "TROLL",
-      "x": 70,
-      "y": 13,
+      "type": "BANDIT",
+      "x": 31,
+      "y": 40,
       "props": {
-        "level": 2,
+        "level": 1,
         "boss": false,
-        "hp": 60,
-        "dmg": 9
+        "hp": 55,
+        "dmg": 10
       }
     },
     {
       "id": "e0008",
       "kind": "enemy",
-      "type": "BANDIT",
-      "x": 27,
-      "y": 55,
+      "type": "WOLF",
+      "x": 44,
+      "y": 37,
       "props": {
-        "level": 2,
+        "level": 1,
         "boss": false,
-        "hp": 60,
+        "hp": 40,
         "dmg": 9
       }
     },
@@ -29500,156 +29424,256 @@
       "id": "e0009",
       "kind": "enemy",
       "type": "WOLF",
-      "x": 94,
-      "y": 80,
+      "x": 47,
+      "y": 32,
       "props": {
-        "level": 3,
+        "level": 1,
         "boss": false,
-        "hp": 75,
-        "dmg": 11
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0010",
       "kind": "enemy",
-      "type": "SKELETON",
-      "x": 77,
-      "y": 29,
+      "type": "WOLF",
+      "x": 40,
+      "y": 30,
       "props": {
-        "level": 3,
-        "boss": true,
-        "hp": 300,
-        "dmg": 22
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0011",
       "kind": "enemy",
-      "type": "GOBLIN",
-      "x": 103,
-      "y": 117,
+      "type": "WOLF",
+      "x": 51,
+      "y": 35,
       "props": {
-        "level": 3,
+        "level": 1,
         "boss": false,
-        "hp": 75,
-        "dmg": 11
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0012",
       "kind": "enemy",
-      "type": "TROLL",
-      "x": 102,
-      "y": 49,
+      "type": "WOLF",
+      "x": 65,
+      "y": 28,
       "props": {
-        "level": 3,
+        "level": 1,
         "boss": false,
-        "hp": 75,
-        "dmg": 11
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0013",
       "kind": "enemy",
-      "type": "BANDIT",
-      "x": 107,
-      "y": 51,
+      "type": "WOLF",
+      "x": 67,
+      "y": 27,
       "props": {
-        "level": 4,
+        "level": 1,
         "boss": false,
-        "hp": 90,
-        "dmg": 13
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0014",
       "kind": "enemy",
       "type": "WOLF",
-      "x": 112,
-      "y": 89,
+      "x": 71,
+      "y": 29,
       "props": {
-        "level": 4,
+        "level": 1,
         "boss": false,
-        "hp": 90,
-        "dmg": 13
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0015",
       "kind": "enemy",
-      "type": "SKELETON",
-      "x": 29,
-      "y": 21,
+      "type": "WOLF",
+      "x": 78,
+      "y": 29,
       "props": {
-        "level": 4,
+        "level": 1,
         "boss": false,
-        "hp": 90,
-        "dmg": 13
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0016",
       "kind": "enemy",
-      "type": "GOBLIN",
-      "x": 61,
-      "y": 86,
+      "type": "WOLF",
+      "x": 85,
+      "y": 35,
       "props": {
-        "level": 4,
+        "level": 1,
         "boss": false,
-        "hp": 90,
-        "dmg": 13
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0017",
       "kind": "enemy",
-      "type": "TROLL",
-      "x": 24,
-      "y": 110,
+      "type": "WOLF",
+      "x": 89,
+      "y": 44,
       "props": {
-        "level": 5,
+        "level": 1,
         "boss": false,
-        "hp": 105,
-        "dmg": 15
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0018",
       "kind": "enemy",
-      "type": "BANDIT",
-      "x": 12,
-      "y": 93,
+      "type": "WOLF",
+      "x": 90,
+      "y": 48,
       "props": {
-        "level": 5,
+        "level": 1,
         "boss": false,
-        "hp": 105,
-        "dmg": 15
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0019",
       "kind": "enemy",
       "type": "WOLF",
-      "x": 69,
-      "y": 88,
+      "x": 89,
+      "y": 48,
       "props": {
-        "level": 5,
+        "level": 1,
         "boss": false,
-        "hp": 105,
-        "dmg": 15
+        "hp": 40,
+        "dmg": 9
       }
     },
     {
       "id": "e0020",
       "kind": "enemy",
-      "type": "SKELETON",
-      "x": 101,
-      "y": 13,
+      "type": "WOLF",
+      "x": 87,
+      "y": 45,
       "props": {
-        "level": 5,
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
+      }
+    },
+    {
+      "id": "e0021",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 92,
+      "y": 46,
+      "props": {
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
+      }
+    },
+    {
+      "id": "e0022",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 92,
+      "y": 47,
+      "props": {
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
+      }
+    },
+    {
+      "id": "e0023",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 94,
+      "y": 46,
+      "props": {
+        "level": 2,
+        "boss": false,
+        "hp": 60,
+        "dmg": 12,
+        "speed": 95,
+        "gold": 40,
+        "patrol": true
+      }
+    },
+    {
+      "id": "e0024",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 94,
+      "y": 48,
+      "props": {
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
+      }
+    },
+    {
+      "id": "e0025",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 94,
+      "y": 46,
+      "props": {
+        "level": 1,
+        "boss": false,
+        "hp": 40,
+        "dmg": 9
+      }
+    },
+    {
+      "id": "e0026",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 89,
+      "y": 46,
+      "props": {
+        "level": 6,
         "boss": true,
-        "hp": 420,
-        "dmg": 30
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
+      }
+    },
+    {
+      "id": "e0027",
+      "kind": "enemy",
+      "type": "WOLF",
+      "x": 87,
+      "y": 47,
+      "props": {
+        "level": 6,
+        "boss": true,
+        "hp": 220,
+        "dmg": 28,
+        "speed": 100,
+        "gold": 150,
+        "patrol": true
       }
     }
   ]
