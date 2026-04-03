@@ -1,0 +1,13 @@
+{
+  "id": "aethoria_city",
+  "name": "Aethoria City",
+  "file": "C:\\Users\\PapaZ\\Desktop\\aetos\\v2\\e\\aethoria\\project_root\\assets\\scenes\\aethoria_city.json",
+  "music": "",
+  "lvmin": 0,
+  "lvmax": 999,
+  "pvp": false,
+  "safe": false,
+  "ar": 30,
+  "ag": 20,
+  "ab": 50
+}

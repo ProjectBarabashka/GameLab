@@ -1,0 +1,42 @@
+{
+  "player_spawn": {
+    "x": 30,
+    "y": 12
+  },
+  "enemy_count": 8,
+  "respawn_time": 60.0,
+  "boss_enabled": true,
+  "particle_scale": 1.0,
+  "lights": {
+    "ambient": {
+      "r": 30,
+      "g": 20,
+      "b": 50
+    },
+    "enabled": true
+  },
+  "shaders": {
+    "enabled": false,
+    "brightness": 1.0,
+    "saturation": 1.0,
+    "vignette": 0.3,
+    "bloom": 0.0
+  },
+  "layers": {
+    "ground": true,
+    "objects": true,
+    "entities": true,
+    "effects": true
+  },
+  "location": {
+    "active_zone": "Aethoria City",
+    "zones": [
+      "Aethoria City",
+      "Dark Forest",
+      "Goblin Caves",
+      "Dragon Lair",
+      "Frozen Tundra",
+      "Map"
+    ]
+  }
+}
