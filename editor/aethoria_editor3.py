@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AETHORIA World Editor v4.0 — Ultimate Game Dev Suite
+Papaz&KuponaLoa — Game Dev Studio v1.3 — Ultimate Game Dev Studio
 ══════════════════════════════════════════════════════
   ■ World Map Editor        — тайлы, враги, НПС, зоны
   ■ Asset Pipeline          — MP4/GIF/PNG → Sprite Sheet → JSON
@@ -41,10 +41,10 @@ CITY_CY     = 60
 CITY_RADIUS = 18
 SAFE_RADIUS = 22
 
-APP_TITLE   = "AETHORIA — Game Dev Suite v4.0"
-VERSION     = "4.0.0"
+APP_TITLE   = "Papaz&KuponaLoa — Game Dev Studio v1.3"
+VERSION     = "1.3.0"
 
-# ── Палитра Hero's Land стиль ──────────────────────────────
+# ── Палитра  стиль ──────────────────────────────
 C = {
     "bg":       "#080714",
     "panel":    "#0e0c20",
@@ -289,6 +289,12 @@ ACTION_KEYWORDS = {
     "death":   ["death","die","dead","defeat","kill"],
     "interact":["interact","talk","use","open"],
 }
+
+try:
+    from aethoria_mmo_tabs import ClassesTab, ItemsTab, ServerTab
+    MMO_TABS = True
+except ImportError:
+    MMO_TABS = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -3445,6 +3451,29 @@ class CharacterSelectTab:
                 for k in ("title","slot_count","skins","bg_color","enter_btn","back_btn"):
                     if k in cs: base[k] = cs[k]
             except Exception: pass
+        # ── Если есть classes.json — он главный источник данных о классах ──
+        classes_path = self.project_root / "assets" / "classes.json"
+        if classes_path.exists():
+            try:
+                classes_data = json.loads(classes_path.read_text(encoding="utf-8"))
+                ui_classes = []
+                for cid, cd in classes_data.items():
+                    bs = cd.get("base_stats", {})
+                    ui_classes.append({
+                        "name":        cd.get("name", cid),
+                        "emoji":       cd.get("emoji", "⚔"),
+                        "color":       cd.get("color", "#888888"),
+                        "description": cd.get("description", ""),
+                        "hp":  int(bs.get("hp",  100)),
+                        "mp":  int(bs.get("mp",   50)),
+                        "str": int(bs.get("str",  10)),
+                        "agi": int(bs.get("dex",  10)),
+                        "int": int(bs.get("int",  10)),
+                        "vit": int(bs.get("vit",  10)),
+                    })
+                if ui_classes:
+                    base["classes"] = ui_classes
+            except Exception: pass
         return base
 
     def _save(self):
@@ -3484,6 +3513,16 @@ class CharacterSelectTab:
                  font=("Segoe UI",13,"bold"), padx=16).pack(side="left")
         btn(hdr, "💾 Сохранить", self._save, C["accent"], padx=14, pady=4).pack(side="right", padx=8)
         btn(hdr, "+ Новый класс", self._add_class, C["green"], "black", padx=10, pady=4).pack(side="right", padx=4)
+
+        # ── Инфо-баннер ───────────────────────────────────────────
+        info_bar = tk.Frame(self.frame, bg="#1a1230", pady=5)
+        info_bar.pack(fill="x")
+        tk.Label(info_bar,
+                 text="ℹ  Базовые статы берутся из вкладки «⚔ Классы» (classes.json). "
+                      "Здесь редактируются внешний вид и настройки экрана выбора. "
+                      "Сохрани в «⚔ Классы» — данные сюда обновятся автоматически.",
+                 bg="#1a1230", fg=C["cyan"],
+                 font=("Segoe UI", 8), padx=16, anchor="w").pack(fill="x")
 
         body = tk.Frame(self.frame, bg=C["bg"])
         body.pack(fill="both", expand=True)
@@ -3585,8 +3624,14 @@ class CharacterSelectTab:
                 btn(fr, "🎨", pick, C["panel3"], padx=4, pady=2).pack(side="left")
 
         # Статы
-        tk.Label(right, text="📊 БАЗОВЫЕ СТАТЫ", bg=C["bg"], fg=C["gold"],
+        classes_path = self.project_root / "assets" / "classes.json"
+        stats_readonly = classes_path.exists()
+        stats_note = " (из classes.json)" if stats_readonly else ""
+        tk.Label(right, text=f"📊 БАЗОВЫЕ СТАТЫ{stats_note}", bg=C["bg"], fg=C["gold"],
                  font=("Segoe UI",10,"bold"), pady=6).pack(fill="x")
+        if stats_readonly:
+            tk.Label(right, text="Редактируй статы во вкладке «⚔ Классы»",
+                     bg=C["bg"], fg=C["muted"], font=("Segoe UI",8)).pack(anchor="w")
         stat_fields = [("hp","HP:"),("mp","MP:"),("str","Сила:"),("agi","Ловкость:"),
                        ("int","Интеллект:"),("vit","Выносливость:")]
         for key, lbl_text in stat_fields:
@@ -3597,8 +3642,11 @@ class CharacterSelectTab:
             vkey = f"{idx}.{key}"
             self._vars[vkey] = var
             fr2 = tk.Frame(fr, bg=C["bg"]); fr2.pack(side="left")
+            spin_state = "disabled" if stats_readonly else "normal"
+            spin_bg    = C["panel2"] if stats_readonly else C["input_bg"]
             tk.Spinbox(fr2, textvariable=var, from_=1, to=999, width=6,
-                       bg=C["input_bg"], fg=C["text"], relief="flat",
+                       bg=spin_bg, fg=C["text"] if not stats_readonly else C["muted"],
+                       relief="flat", state=spin_state,
                        buttonbackground=C["panel3"], insertbackground=C["gold"],
                        font=("Segoe UI",9)).pack(side="left")
 
@@ -4001,6 +4049,9 @@ class LocationsTab:
             if meta_path.exists():
                 try:
                     m = json.loads(meta_path.read_text(encoding="utf-8"))
+                    # Не берём "file" из meta.json — путь всегда вычисляется
+                    # динамически из project_root (иначе сломается на другом компе)
+                    m.pop("file", None)
                     info.update(m)
                 except: pass
             self._scenes.append(info)
@@ -4108,9 +4159,10 @@ class LocationsTab:
         sc["safe"] = self._v_safe.get()
         try: sc["ar"]=int(self._v_ar.get()); sc["ag"]=int(self._v_ag.get()); sc["ab"]=int(self._v_ab.get())
         except: pass
-        # Сохраняем meta.json
+        # Сохраняем meta.json — без "file", путь всегда вычисляется динамически
+        meta_save = {k: v for k, v in sc.items() if k != "file"}
         meta_path = self.scenes_dir / f"{sc['id']}.meta.json"
-        meta_path.write_text(json.dumps(sc,ensure_ascii=False,indent=2),encoding="utf-8")
+        meta_path.write_text(json.dumps(meta_save,ensure_ascii=False,indent=2),encoding="utf-8")
         # Обновляем game_config
         self._add_to_config(sc["name"])
         self._load_scene_list()
@@ -4998,6 +5050,12 @@ class AethoriaEditor:
         self.char_tab   = CharacterSelectTab(self.notebook, self.project_root)
         self.hud_tab    = UIEditorTab(self.notebook, self.project_root)
 
+        # ── MMORPG вкладки ─────────────────────────────────────
+        if MMO_TABS:
+            self.classes_tab = ClassesTab(self.notebook, self.project_root)
+            self.items_tab   = ItemsTab(self.notebook, self.project_root)
+            self.server_tab  = ServerTab(self.notebook, self.project_root)
+
         # Горячие клавиши
         self._bind_keys()
 
@@ -5015,9 +5073,9 @@ class AethoriaEditor:
         # Логотип
         tk.Label(bar, text="⚔", bg=C["panel"], fg=C["gold"],
                 font=("Segoe UI",16), padx=8).pack(side="left")
-        tk.Label(bar, text="AETHORIA", bg=C["panel"], fg=C["gold2"],
+        tk.Label(bar, text="Papaz & KuponaLoa", bg=C["panel"], fg=C["gold2"],
                 font=("Segoe UI",12,"bold"), padx=2).pack(side="left")
-        tk.Label(bar, text=f"Game Dev Suite v{VERSION}", bg=C["panel"], fg=C["muted"],
+        tk.Label(bar, text=f"Game Dev Studio v{VERSION}", bg=C["panel"], fg=C["muted"],
                 font=("Segoe UI",9), padx=4).pack(side="left")
 
         # Инфо о проекте
@@ -5032,7 +5090,7 @@ class AethoriaEditor:
     def _build_statusbar(self):
         sb = tk.Frame(self.root, bg=C["panel2"], pady=3)
         sb.pack(fill="x", side="bottom")
-        self.status_var = tk.StringVar(value=f"AETHORIA Editor v{VERSION} готов | Проект: {self.project_root}")
+        self.status_var = tk.StringVar(value=f"Papaz & KuponaLoa Editor v{VERSION} готов | Проект: {self.project_root}")
         tk.Label(sb, textvariable=self.status_var, bg=C["panel2"], fg=C["muted"],
                 font=("Segoe UI",8), padx=12, anchor="w").pack(side="left")
 
@@ -5117,17 +5175,24 @@ class AethoriaEditor:
         except: pass
         try: self.hud_tab._save()
         except: pass
+        if MMO_TABS:
+            try: self.classes_tab._save()
+            except: pass
+            try: self.items_tab._save()
+            except: pass
+            try: self.server_tab._save()
+            except: pass
         self._save_state()
         self.status_var.set("💾 Всё сохранено!")
-        self.root.after(3000, lambda: self.status_var.set(f"AETHORIA Editor v{VERSION} | {self.project_root}"))
+        self.root.after(3000, lambda: self.status_var.set(f"Papaz & KuponaLoa Editor v{VERSION} | {self.project_root}"))
 
     def _show_help(self):
         win = tk.Toplevel(self.root)
-        win.title("Помощь — AETHORIA Editor v4.0")
+        win.title("Помощь — Papaz Editor v1.3")
         win.geometry("600x600")
         win.configure(bg=C["panel"])
 
-        tk.Label(win, text="⚔ AETHORIA Editor v4.0 — Помощь", bg=C["panel"],
+        tk.Label(win, text="⚔ Papaz & KuponaLoa Editor v1.3 — Помощь", bg=C["panel"],
                 fg=C["gold2"], font=("Segoe UI",13,"bold")).pack(pady=12)
 
         fr, txt = scrolled_text(win, height=25, width=70)
@@ -5200,7 +5265,7 @@ F1           — эта справка
 
     def _show_about(self):
         messagebox.showinfo("О редакторе",
-            f"AETHORIA: Game Dev Suite v{VERSION}\n\n"
+            f"Papaz & KuponaLoa Game Dev Studio v{VERSION}\n\n"
             "Полный пайплайн разработки:\n"
             "• Редактор карты мира 120×120 тайлов\n"
             "• MP4/GIF/PNG → Sprite Sheet + JSON авто\n"
