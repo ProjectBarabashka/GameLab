@@ -240,6 +240,7 @@ private:
     };
     
     std::vector<Enemy> enemies;
+    std::map<int, AnimationPlayer> enemyAnimations; 
     Enemy* selectedTarget;
     
     // UI elements
@@ -438,26 +439,48 @@ public:
         window.setView(gameView);
     }
     
-    void updateEnemies() {
-        for (auto& enemy : enemies) {
-            // Simple AI: chase player
-            Vec2 dirToPlayer = (player.position - enemy.position).normalized();
-            enemy.velocity = dirToPlayer * enemy.speed;
+   void updateEnemies() {
+    for (size_t i = 0; i < enemies.size(); i++) {
+        auto& enemy = enemies[i];
+        
+        // 1. Движение к игроку
+        Vec2 dirToPlayer = (player.position - enemy.position);
+        float distToPlayer = dirToPlayer.length();
+        
+        if (distToPlayer > 5.0f) { // Двигаемся, только если игрок не вплотную
+            enemy.velocity = dirToPlayer.normalized() * enemy.speed;
             enemy.position = enemy.position + enemy.velocity * deltaTime;
-            
-            // Attack logic
-            float distToPlayer = (player.position - enemy.position).length();
-            if (distToPlayer < 30 && enemy.attackTimer <= 0) {
-                player.hp -= enemy.damage;
-                enemy.attackTimer = enemy.attackCooldown;
-                audioManager->playSound("damage", 0.7f);
-            } else if (enemy.attackTimer > 0) {
-                enemy.attackTimer -= deltaTime;
-            }
+        } else {
+            enemy.velocity = Vec2(0, 0);
+        }
+        
+        // 2. ПОВОРОТ (Зеркалирование спрайта)
+        // Если игрок слева от моба (разница по X отрицательная)
+        if (player.position.x < enemy.position.x - 2.0f) {
+            // Разворачиваем влево
+            enemyAnimations[i].getSprite().setScale(-1.0f, 1.0f);
+        } 
+        else if (player.position.x > enemy.position.x + 2.0f) {
+            // Смотрим вправо
+            enemyAnimations[i].getSprite().setScale(1.0f, 1.0f);
+        }
+
+        // 3. ОБНОВЛЕНИЕ АНИМАЦИИ И ПОЗИЦИИ
+        enemyAnimations[i].update(deltaTime);
+        enemyAnimations[i].setPosition(enemy.position.x, enemy.position.y);
+
+        // 4. ЛОГИКА АТАКИ
+        if (distToPlayer < 30.0f && enemy.attackTimer <= 0) {
+            player.hp -= enemy.damage;
+            enemy.attackTimer = enemy.attackCooldown;
+            audioManager->playSound("damage", 0.7f);
+        } else if (enemy.attackTimer > 0) {
+            enemy.attackTimer -= deltaTime;
         }
     }
-    
-    void render() {
+}
+
+      void render() {
         window.clear(sf::Color(20, 15, 35));
         
         // Draw world
@@ -478,7 +501,7 @@ public:
         window.display();
     }
     
-    void drawWorld() {
+   void drawWorld() {
         // Draw grid
         sf::Color gridColor(40, 35, 60);
         
@@ -513,34 +536,29 @@ public:
     }
     
     void drawEnemies() {
-        for (auto& enemy : enemies) {
-            sf::CircleShape enemyShape(10);
-            enemyShape.setPosition(enemy.position.x - 10, enemy.position.y - 10);
-            
-            // Color based on boss status
-            if (enemy.isBoss) {
-                enemyShape.setFillColor(sf::Color(255, 165, 0));
-                enemyShape.setOutlineThickness(3);
-            } else {
-                enemyShape.setFillColor(sf::Color(150, 100, 100));
-                enemyShape.setOutlineThickness(1);
-            }
-            
-            // Highlight selected
-            if (&enemy == selectedTarget) {
-                enemyShape.setOutlineColor(sf::Color::Red);
-                enemyShape.setOutlineThickness(3);
-            } else {
-                enemyShape.setOutlineColor(sf::Color(100, 100, 100));
-            }
-            
-            window.draw(enemyShape);
-            
-            // Draw HP bar
-            drawHealthBar(enemy.position.x - 15, enemy.position.y - 25,
-                         enemy.hp / enemy.maxHp, sf::Color(200, 50, 50));
+    for (size_t i = 0; i < enemies.size(); i++) {
+        auto& enemy = enemies[i];
+        
+        // 1. Рисуем анимацию вместо кружочка
+        // enemyAnimations[i] — это тот самый AnimationPlayer, который мы добавили в map
+        enemyAnimations[i].draw(window);
+
+        // 2. Рисуем полоску ХП (оставляем как было)
+        drawHealthBar(enemy.position.x - 15, enemy.position.y - 25,
+                     enemy.hp / enemy.maxHp, sf::Color(200, 50, 50));
+                     
+        // 3. Если моб выбран (таргет), можно оставить кружочек-подсветку под ногами
+        if (&enemy == selectedTarget) {
+            sf::CircleShape targetRing(15);
+            targetRing.setOrigin(15, 15);
+            targetRing.setPosition(enemy.position.x, enemy.position.y);
+            targetRing.setFillColor(sf::Color::Transparent);
+            targetRing.setOutlineColor(sf::Color::Red);
+            targetRing.setOutlineThickness(2);
+            window.draw(targetRing);
         }
     }
+}
     
     void drawHealthBar(float x, float y, float percent, sf::Color color) {
         sf::RectangleShape bg(sf::Vector2f(30, 4));

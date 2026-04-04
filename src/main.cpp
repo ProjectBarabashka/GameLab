@@ -1064,7 +1064,11 @@ public:
                     if(e.state==EnemyState::PATROL){
                         V2 toDest=e.patrolTarget-e.pos;
                         if(toDest.len()<20.f){e.state=EnemyState::IDLE;e.aiTimer=1.f;}
-                        else e.pos=e.pos+toDest.norm()*e.speed*dt;
+                        else {
+                            V2 move=toDest.norm()*e.speed*dt;
+                            e.pos=e.pos+move;
+                            if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+                        }
                     }
                 }
                 break;
@@ -1072,7 +1076,11 @@ public:
                 V2 toPlayer=player.pos-e.pos;
                 float d=toPlayer.len();
                 if(d<DEAGGRO_RANGE){
-                    if(d>40.f) e.pos=e.pos+toPlayer.norm()*e.speed*dt;
+                    if(d>40.f){
+                        V2 move=toPlayer.norm()*e.speed*dt;
+                        e.pos=e.pos+move;
+                        if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+                    }
                     else e.state=EnemyState::COMBAT;
                 } else e.state=EnemyState::PATROL;
                 break;}
@@ -1090,11 +1098,28 @@ public:
                 break;}
             case EnemyState::RETURN:
                 if(dist(e.pos,e.spawnPos)<10.f) {e.pos=e.spawnPos;e.state=EnemyState::IDLE;}
-                else e.pos=e.pos+(e.spawnPos-e.pos).norm()*e.speed*dt;
+                else {
+                    V2 move=(e.spawnPos-e.pos).norm()*e.speed*dt;
+                    e.pos=e.pos+move;
+                    if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+                }
                 break;
             default:break;
             }
             if (e.animPlayer) {
+                // Переключаем анимацию в зависимости от состояния
+                std::string entityName = getEntityName(e.type);
+                bool isMoving = (e.state == EnemyState::PATROL ||
+                                 e.state == EnemyState::AGGRO  ||
+                                 e.state == EnemyState::RETURN);
+                std::string wantedAnim = isMoving ? "walk" : "idle";
+                // Фолбэк: если walk нет — оставляем idle
+                if (wantedAnim == "walk" && e.animPlayer->getCurrentAction() != "walk") {
+                    if (!e.animPlayer->playAnimation(entityName, "walk"))
+                        e.animPlayer->playAnimation(entityName, "idle");
+                } else if (wantedAnim == "idle" && e.animPlayer->getCurrentAction() != "idle") {
+                    e.animPlayer->playAnimation(entityName, "idle");
+                }
                 e.animPlayer->update(dt);
                 e.animPlayer->setPosition(e.pos.x, e.pos.y);
             }

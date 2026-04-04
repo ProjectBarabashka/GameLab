@@ -202,6 +202,11 @@ private:
     bool isPlaying;
     bool finished;
     
+    // ── Направление взгляда (независимо от масштаба) ──────────
+    bool  _facingLeft = false;
+    float _scaleX     = 1.0f;   // абсолютное значение, без знака
+    float _scaleY     = 1.0f;
+    
 public:
     AnimationPlayer(AnimationManager* mgr = nullptr) 
         : manager(mgr), currentClip(nullptr), currentFrame(0), 
@@ -237,6 +242,9 @@ public:
         
         // Центрируем origin по центру кадра чтобы позиция = центр персонажа
         sprite.setOrigin(clip->frameWidth / 2.0f, clip->frameHeight / 2.0f);
+        
+        // Восстанавливаем масштаб с направлением (facing сохраняется между сменами анимации)
+        _applyScale();
         
         return true;
     }
@@ -295,8 +303,30 @@ public:
         }
     }
     
+    // ── Масштаб — не перезаписывает направление ──────────────
     void setScale(float x, float y) {
-        sprite.setScale(x, y);
+        _scaleX = std::abs(x);
+        _scaleY = y;
+        _applyScale();
+    }
+
+    // ── Направление взгляда ────────────────────────────────────
+    // facingLeft=true  → спрайт отражён по X (смотрит влево)
+    // facingLeft=false → спрайт в оригинале  (смотрит вправо)
+    void setFacing(bool facingLeft) {
+        _facingLeft = facingLeft;
+        _applyScale();
+    }
+
+    bool isFacingLeft() const { return _facingLeft; }
+
+    // Вызывай каждый кадр из логики движения:
+    //   player.updateFacingFromVelocity(vx);
+    //   enemy.updateFacingFromVelocity(vx);
+    void updateFacingFromVelocity(float vx) {
+        if (vx < -0.5f) setFacing(true);
+        else if (vx > 0.5f) setFacing(false);
+        // При vx ≈ 0 направление сохраняется
     }
     
     void setPosition(float x, float y) {
@@ -312,5 +342,12 @@ private:
         if (currentClip && currentFrame < currentClip->frames.size()) {
             sprite.setTextureRect(currentClip->frames[currentFrame].rect);
         }
+    }
+    
+    // Применяет масштаб с учётом направления взгляда
+    void _applyScale() {
+        sprite.setScale(_facingLeft ? -_scaleX : _scaleX, _scaleY);
+        // При отражении по X origin должен оставаться в центре кадра —
+        // он уже выставлен в playAnimation(), поэтому дополнительно ничего не нужно.
     }
 };
