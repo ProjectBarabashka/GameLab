@@ -1,116 +1,102 @@
 @echo off
-setlocal EnableDelayedExpansion
-chcp 65001 >nul 2>nul
+setlocal enabledelayedexpansion
 
-echo.
-echo ╔══════════════════════════════════════╗
-echo ║   AETHORIA: Eternal Realms           ║
-echo ║   Build Script for Windows           ║
-echo ╚══════════════════════════════════════╝
-echo.
+echo ========================================
+echo    AETHORIA: Build Script
+echo ========================================
 
-REM ── Проверка CMake ───────────────────────────────────────────
-where cmake >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] CMake не найден!
-    echo        Скачай: https://cmake.org/download/
-    echo        Добавь в PATH при установке.
-    pause & exit /b 1
+set "BUILD_TYPE=Debug"
+if /I "%1"=="release" set "BUILD_TYPE=Release"
+
+set "VCVARS="
+if defined VSCMD_ARG_TGT_ARCH (
+    echo [OK] MSVC environment already ready.
+    goto :build
 )
-echo [OK] CMake: 
-cmake --version | findstr /C:"cmake version"
 
-REM ── Определяем конфигурацию ──────────────────────────────────
-set BUILD_TYPE=Release
-if /i "%1"=="debug"   set BUILD_TYPE=Debug
-if /i "%1"=="release" set BUILD_TYPE=Release
+echo [*] Searching for VS...
 
-echo [*] Build type: %BUILD_TYPE%
-echo.
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" (
+    for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -property installationPath`) do (
+        set "VS_PATH=%%i"
+    )
+)
 
-REM ── Создаём папку build ──────────────────────────────────────
+if defined VS_PATH (
+    set "VCVARS=!VS_PATH!\VC\Auxiliary\Build\vcvarsall.bat"
+)
+
+if not exist "!VCVARS!" (
+    for /d %%i in ("C:\Program Files\Microsoft Visual Studio\2022\*") do (
+        if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" set "VCVARS=%%i\VC\Auxiliary\Build\vcvarsall.bat"
+    )
+)
+
+if not exist "!VCVARS!" (
+    echo [ERROR] vcvarsall.bat not found!
+    pause
+    exit /b 1
+)
+
+echo [OK] Found: "!VCVARS!"
+call "!VCVARS!" x64
+
+:build
+:: Определяем путь к clang-cl
+set "CLANG_CL="
+where clang-cl >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=*" %%i in ('where clang-cl') do set "CLANG_CL=%%i"
+) else (
+    if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "CLANG_CL=C:\Program Files\LLVM\bin\clang-cl.exe"
+)
+
+if not defined CLANG_CL (
+    echo [ERROR] clang-cl not found!
+    pause
+    exit /b 1
+)
+
+:: ИСПРАВЛЕНИЕ: Заменяем \ на / для CMake
+set "COMPILER_PATH=%CLANG_CL:\=/%"
+
 if not exist build mkdir build
 cd build
 
-REM ── Определяем генератор ─────────────────────────────────────
-set GENERATOR=
-where msbuild >nul 2>nul
-if not errorlevel 1 (
-    echo [*] Visual Studio найден — используем MSVC
-    REM Пробуем VS 2022, 2019, 2017 по порядку
-    cmake .. -G "Visual Studio 17 2022" >nul 2>nul
-    if errorlevel 1 cmake .. -G "Visual Studio 16 2019" >nul 2>nul
-    if errorlevel 1 cmake .. -G "Visual Studio 15 2017"
-) else (
-    where mingw32-make >nul 2>nul
-    if not errorlevel 1 (
-        echo [*] MinGW найден
-        cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-    ) else (
-        echo [*] Используем дефолтный генератор
-        cmake .. -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-    )
-)
+echo [*] Running CMake...
+cmake -G "Ninja" ^
+ -DCMAKE_CXX_COMPILER="%COMPILER_PATH%" ^
+ -DCMAKE_C_COMPILER="%COMPILER_PATH%" ^
+ -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+ ..
 
 if errorlevel 1 (
-    echo.
-    echo [ERROR] CMake конфигурация не удалась!
-    echo.
-    echo Возможные причины:
-    echo  1. SFML не найден. Укажи путь:
-    echo     cmake .. -DSFML_DIR="C:\путь\к\SFML\lib\cmake\SFML"
-    echo  2. Компилятор не найден. Установи Visual Studio или MinGW.
+    echo [ERROR] CMake failed!
     cd ..
-    pause & exit /b 1
+    pause
+    exit /b 1
 )
 
-echo.
-echo [*] Сборка...
-echo.
-cmake --build . --config %BUILD_TYPE% --parallel
+echo [*] Building...
+cmake --build . --config %BUILD_TYPE%
 
 if errorlevel 1 (
-    echo.
-    echo [ERROR] Сборка не удалась!
+    echo [ERROR] Build failed!
     cd ..
-    pause & exit /b 1
+    pause
+    exit /b 1
 )
 
 cd ..
+echo [OK] Done!
 
-echo.
-echo ╔══════════════════════════════════════╗
-echo ║   [OK] Сборка завершена успешно!     ║
-echo ╚══════════════════════════════════════╝
-echo.
-
-REM Ищем .exe в разных местах
-set EXE=
-if exist "build\%BUILD_TYPE%\AETHORIA.exe" set EXE=build\%BUILD_TYPE%\AETHORIA.exe
-if exist "build\AETHORIA.exe"              set EXE=build\AETHORIA.exe
-
-if defined EXE (
-    echo Исполняемый файл: %EXE%
-    echo.
-    echo [1] Запустить игру
-    echo [2] Запустить редактор (editor\aethoria_editor3.py)
-    echo [3] Открыть папку
-    echo [4] Выход
-    echo.
-    set /p choice="Выбор: "
-    if "!choice!"=="1" (
-        echo.
-        echo [*] Запуск игры...
-        start "" "%EXE%"
-    ) else if "!choice!"=="2" (
-        echo.
-        echo [*] Запуск редактора...
-        python editor\aethoria_editor3.py
-    ) else if "!choice!"=="3" (
-        explorer build\%BUILD_TYPE%
-    )
-) else (
-    echo [WARN] .exe не найден — проверь папку build\
+if exist "build\AETHORIA.exe" (
+    echo 1. Start Game
+    echo 2. Start Editor
+    set /p CHOICE="Choice: "
+    if "!CHOICE!"=="1" start "" "build\AETHORIA.exe"
+    if "!CHOICE!"=="2" start "" python "editor\aethoria_editor3.py"
 )
 
 pause

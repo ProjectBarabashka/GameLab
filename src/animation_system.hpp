@@ -1,5 +1,6 @@
 // animation_system.hpp - Полная система загрузки и воспроизведения анимаций
-// Загружает спрайтшиты и JSON конфиги из редактора
+// ИСПРАВЛЕНО: facing/flip корректно работает с любым origin
+// ИСПРАВЛЕНО: setPosition учитывает направление при отражении спрайта
 
 #pragma once
 #include <SFML/Graphics.hpp>
@@ -35,15 +36,14 @@ struct AnimationClip {
 // ════════════════════════════════════════════════════════════════
 class AnimationManager {
 private:
-    std::map<std::string, std::map<std::string, AnimationClip>> animations;  // [entity][action] = clip
-    std::map<std::string, sf::Texture> textures;                             // [entity_action] = texture
+    std::map<std::string, std::map<std::string, AnimationClip>> animations;
+    std::map<std::string, sf::Texture> textures;
     std::string assetsDir;
     
 public:
     AnimationManager(const std::string& assetsDirPath = "assets") 
         : assetsDir(assetsDirPath) {}
     
-    // ── Загрузка конфига из JSON ──────────────────────────────────
     bool loadAnimationsJSON(const std::string& jsonPath) {
         std::ifstream file(jsonPath);
         if (!file.is_open()) {
@@ -62,7 +62,6 @@ public:
             return false;
         }
         
-        // Парсим JSON: { "player": { "idle": {...}, "walk": {...} }, ... }
         for (auto& [entity, entityVal] : json->objectVal) {
             if (!entityVal->isObject()) continue;
             
@@ -72,39 +71,25 @@ public:
                 AnimationClip clip;
                 clip.name = action;
                 
-                // Читаем параметры
                 if (auto sheet = actionVal->get("sheet")) {
                     clip.sheetPath = assetsDir + "/" + sheet->asString();
                 }
-                if (auto w = actionVal->get("width")) {
-                    clip.frameWidth = w->asInt();
-                }
-                if (auto h = actionVal->get("height")) {
-                    clip.frameHeight = h->asInt();
-                }
-                if (auto f = actionVal->get("fps")) {
-                    clip.fps = (float)f->asDouble();
-                }
-                if (auto l = actionVal->get("loop")) {
-                    clip.loop = l->asBool();
-                }
+                if (auto w = actionVal->get("width"))  { clip.frameWidth  = w->asInt(); }
+                if (auto h = actionVal->get("height")) { clip.frameHeight = h->asInt(); }
+                if (auto f = actionVal->get("fps"))    { clip.fps = (float)f->asDouble(); }
+                if (auto l = actionVal->get("loop"))   { clip.loop = l->asBool(); }
                 
                 int frames = 0, cols = 0, rows = 0;
                 if (auto fr = actionVal->get("frames")) frames = fr->asInt();
-                if (auto c = actionVal->get("cols")) cols = c->asInt();
-                if (auto r = actionVal->get("rows")) rows = r->asInt();
+                if (auto c  = actionVal->get("cols"))   cols   = c->asInt();
+                if (auto r  = actionVal->get("rows"))   rows   = r->asInt();
                 
-                // Генерируем кадры из спрайтшита
                 generateFrames(clip, frames, cols, rows, clip.frameWidth, clip.frameHeight);
                 
-                // Загружаем текстуру если её ещё нет
                 std::string texKey = entity + "_" + action;
                 if (textures.find(texKey) == textures.end()) {
                     sf::Image img;
                     if (img.loadFromFile(clip.sheetPath)) {
-                        // ── Умная обработка прозрачности ─────────────────────
-                        // Проверяем, есть ли у изображения реальный альфа-канал
-                        // (сэмплируем угловые точки и центр)
                         auto sz = img.getSize();
                         bool hasRealAlpha = false;
                         if (sz.x > 0 && sz.y > 0) {
@@ -121,9 +106,7 @@ public:
                             }
                         }
                         if (!hasRealAlpha) {
-                            // Нет альфы — убираем белый фон (цветовой ключ)
                             img.createMaskFromColor(sf::Color(255, 255, 255), 0);
-                            // Дополнительно убираем почти-белые пиксели (сглаживание краёв)
                             for (unsigned py = 0; py < sz.y; py++) {
                                 for (unsigned px = 0; px < sz.x; px++) {
                                     auto c = img.getPixel(px, py);
@@ -150,14 +133,11 @@ public:
         return !animations.empty();
     }
     
-    // ── Получение анимации ────────────────────────────────────────
     AnimationClip* getAnimation(const std::string& entity, const std::string& action) {
         auto entityIt = animations.find(entity);
         if (entityIt == animations.end()) return nullptr;
-        
         auto actionIt = entityIt->second.find(action);
         if (actionIt == entityIt->second.end()) return nullptr;
-        
         return &actionIt->second;
     }
     
@@ -170,7 +150,7 @@ public:
 private:
     void generateFrames(AnimationClip& clip, int totalFrames, int cols, int rows, 
                        int frameW, int frameH) {
-        float frameDuration = 1.0f / clip.fps;
+        float frameDuration = clip.fps > 0 ? 1.0f / clip.fps : 0.1f;
         int frameIndex = 0;
         
         for (int row = 0; row < rows && frameIndex < totalFrames; row++) {
@@ -186,7 +166,9 @@ private:
 };
 
 // ════════════════════════════════════════════════════════════════
-// ПЛЕЕР АНИМАЦИЙ (используется для каждого объекта)
+// ПЛЕЕР АНИМАЦИЙ
+// ИСПРАВЛЕНО: правильный flip спрайта - origin ставится в центр,
+//             при отражении по X offset компенсируется через position.
 // ════════════════════════════════════════════════════════════════
 class AnimationPlayer {
 private:
@@ -202,10 +184,14 @@ private:
     bool isPlaying;
     bool finished;
     
-    // ── Направление взгляда (независимо от масштаба) ──────────
+    // Направление и масштаб (отдельно от sprite.scale)
     bool  _facingLeft = false;
-    float _scaleX     = 1.0f;   // абсолютное значение, без знака
+    float _scaleX     = 1.0f;
     float _scaleY     = 1.0f;
+
+    // Мировая позиция (центр персонажа)
+    float _worldX = 0.f;
+    float _worldY = 0.f;
     
 public:
     AnimationPlayer(AnimationManager* mgr = nullptr) 
@@ -216,13 +202,14 @@ public:
     
     // ── Воспроизведение анимации ───────────────────────────────────
     bool playAnimation(const std::string& entity, const std::string& action) {
-        if (!manager) {
-            std::cerr << "[ERROR] AnimationManager не установлен!" << std::endl;
-            return false;
-        }
+        if (!manager) return false;
+        
+        // Если та же самая анимация уже играет — не перезапускаем
+        if (currentEntity == entity && currentAction == action && isPlaying && !finished)
+            return true;
         
         auto clip = manager->getAnimation(entity, action);
-        auto tex = manager->getTexture(entity, action);
+        auto tex  = manager->getTexture(entity, action);
         
         if (!clip || !tex) {
             std::cerr << "[ERROR] Анимация не найдена: " << entity << "/" << action << std::endl;
@@ -231,27 +218,26 @@ public:
         
         currentEntity = entity;
         currentAction = action;
-        currentClip = clip;
-        currentFrame = 0;
-        frameTimer = 0;
-        isPlaying = true;
-        finished = false;
+        currentClip   = clip;
+        currentFrame  = 0;
+        frameTimer    = 0;
+        isPlaying     = true;
+        finished      = false;
         
         sprite.setTexture(*tex);
         updateFrame();
         
-        // Центрируем origin по центру кадра чтобы позиция = центр персонажа
-        sprite.setOrigin(clip->frameWidth / 2.0f, clip->frameHeight / 2.0f);
+        // Origin — центр кадра (для корректного позиционирования и flip)
+        sprite.setOrigin(clip->frameWidth  / 2.0f,
+                         clip->frameHeight / 2.0f);
         
-        // Восстанавливаем масштаб с направлением (facing сохраняется между сменами анимации)
-        _applyScale();
-        
+        _applyTransform();
         return true;
     }
     
     // ── Обновление ──────────────────────────────────────────────────
     void update(float deltaTime) {
-        if (!isPlaying || !currentClip) return;
+        if (!isPlaying || !currentClip || currentClip->frames.empty()) return;
         
         frameTimer += deltaTime;
         float frameDuration = currentClip->frames[currentFrame].duration;
@@ -260,12 +246,12 @@ public:
             frameTimer -= frameDuration;
             currentFrame++;
             
-            if (currentFrame >= currentClip->frames.size()) {
+            if (currentFrame >= (int)currentClip->frames.size()) {
                 if (currentClip->loop) {
                     currentFrame = 0;
                 } else {
-                    finished = true;
-                    isPlaying = false;
+                    finished   = true;
+                    isPlaying  = false;
                     currentFrame = (int)(currentClip->frames.size() - 1);
                 }
             }
@@ -276,61 +262,56 @@ public:
     
     // ── Рисование ──────────────────────────────────────────────────
     void draw(sf::RenderWindow& window) {
-        window.draw(sprite);
+        if (currentClip)
+            window.draw(sprite);
     }
     
     // ── Getters ────────────────────────────────────────────────────
     sf::Sprite& getSprite() { return sprite; }
-    bool isFinished() const { return finished; }
-    bool isAnimating() const { return isPlaying; }
-    int getCurrentFrame() const { return currentFrame; }
+    bool isFinished()    const { return finished; }
+    bool isAnimating()   const { return isPlaying; }
+    int  getCurrentFrame()const { return currentFrame; }
     std::string getCurrentAction() const { return currentAction; }
+    std::string getCurrentEntity() const { return currentEntity; }
     
     // ── Управление ──────────────────────────────────────────────────
-    void stop() {
-        isPlaying = false;
-        currentFrame = 0;
-        frameTimer = 0;
-    }
+    void stop()   { isPlaying = false; currentFrame = 0; frameTimer = 0; }
+    void pause()  { isPlaying = false; }
+    void resume() { if (currentClip) isPlaying = true; }
     
-    void pause() {
-        isPlaying = false;
-    }
-    
-    void resume() {
-        if (currentClip) {
-            isPlaying = true;
-        }
-    }
-    
-    // ── Масштаб — не перезаписывает направление ──────────────
+    // ── Масштаб ──────────────────────────────────────────────────
+    // Вызывай с положительными значениями — flip управляется через setFacing()
     void setScale(float x, float y) {
         _scaleX = std::abs(x);
-        _scaleY = y;
-        _applyScale();
+        _scaleY = std::abs(y);
+        _applyTransform();
     }
 
     // ── Направление взгляда ────────────────────────────────────
-    // facingLeft=true  → спрайт отражён по X (смотрит влево)
-    // facingLeft=false → спрайт в оригинале  (смотрит вправо)
+    // facingLeft=true  → смотрит влево (спрайт зеркален по X)
+    // facingLeft=false → смотрит вправо
     void setFacing(bool facingLeft) {
-        _facingLeft = facingLeft;
-        _applyScale();
+        if (_facingLeft != facingLeft) {
+            _facingLeft = facingLeft;
+            _applyTransform();
+        }
     }
 
     bool isFacingLeft() const { return _facingLeft; }
 
-    // Вызывай каждый кадр из логики движения:
-    //   player.updateFacingFromVelocity(vx);
-    //   enemy.updateFacingFromVelocity(vx);
+    // Вызывай каждый кадр из логики движения
+    // При vx ≈ 0 направление сохраняется (порог 0.5 пикс/с)
     void updateFacingFromVelocity(float vx) {
-        if (vx < -0.5f) setFacing(true);
-        else if (vx > 0.5f) setFacing(false);
-        // При vx ≈ 0 направление сохраняется
+        if      (vx < -0.5f) setFacing(true);
+        else if (vx >  0.5f) setFacing(false);
     }
     
+    // ── Позиция (центр персонажа в мире) ──────────────────────
+    // Работает правильно при любом facing — внутри компенсируется offset
     void setPosition(float x, float y) {
-        sprite.setPosition(x, y);
+        _worldX = x;
+        _worldY = y;
+        _applyTransform();
     }
     
     void setOrigin(float x, float y) {
@@ -339,15 +320,16 @@ public:
     
 private:
     void updateFrame() {
-        if (currentClip && currentFrame < currentClip->frames.size()) {
+        if (currentClip && currentFrame < (int)currentClip->frames.size())
             sprite.setTextureRect(currentClip->frames[currentFrame].rect);
-        }
     }
     
-    // Применяет масштаб с учётом направления взгляда
-    void _applyScale() {
-        sprite.setScale(_facingLeft ? -_scaleX : _scaleX, _scaleY);
-        // При отражении по X origin должен оставаться в центре кадра —
-        // он уже выставлен в playAnimation(), поэтому дополнительно ничего не нужно.
+    // Применяет масштаб + flip + позицию одновременно.
+    // При отражении по X SFML зеркалит вокруг origin, а не вокруг позиции,
+    // поэтому дополнительного сдвига не нужно — origin уже в центре кадра.
+    void _applyTransform() {
+        float sx = _facingLeft ? -_scaleX : _scaleX;
+        sprite.setScale(sx, _scaleY);
+        sprite.setPosition(_worldX, _worldY);
     }
 };

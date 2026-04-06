@@ -250,6 +250,74 @@ public:
         return true;
     }
 
+    // ── Клонирование ─────────────────────────────────────────────
+
+    // Клонирует prefab sourceId под новым именем newId.
+    // Возвращает false если источник не найден или newId уже занят.
+    // Пример: clone("goblin_warrior", "goblin_warrior_elite")
+    bool clone(const std::string& sourceId, const std::string& newId) {
+        if (!has(sourceId)) {
+            std::cerr << "[Prefab] clone: источник не найден: " << sourceId << "\n";
+            return false;
+        }
+        if (has(newId)) {
+            std::cerr << "[Prefab] clone: ID уже занят: " << newId << "\n";
+            return false;
+        }
+        PrefabTemplate t = templates.at(sourceId);
+        t.id = newId;
+        // Сбрасываем onSpawn-хук — не копируется, задаётся отдельно
+        t.onSpawn = nullptr;
+        templates[newId] = std::move(t);
+        std::cout << "[Prefab] Клонирован: " << sourceId << " → " << newId << "\n";
+        return true;
+    }
+
+    // Клонирует с автоматическим числовым суффиксом.
+    // "goblin_warrior" → "goblin_warrior_02", "_03" и т.д.
+    // Возвращает новый ID или "" при ошибке.
+    // Пример: std::string id = catalog.cloneNumbered("goblin_warrior");
+    std::string cloneNumbered(const std::string& sourceId) {
+        if (!has(sourceId)) {
+            std::cerr << "[Prefab] cloneNumbered: источник не найден: " << sourceId << "\n";
+            return "";
+        }
+        char buf[8];
+        for (int n = 2; n <= 99; n++) {
+            std::snprintf(buf, sizeof(buf), "_%02d", n);
+            std::string newId = sourceId + buf;
+            if (!has(newId)) {
+                clone(sourceId, newId);
+                return newId;
+            }
+        }
+        std::cerr << "[Prefab] cloneNumbered: все суффиксы заняты для " << sourceId << "\n";
+        return "";
+    }
+
+    // Проверяет каталог на дубликаты по displayName (разные ID, одно имя).
+    // Безопасна: только читает, ничего не изменяет.
+    // Возвращает число найденных дублей.
+    int validateDuplicates() const {
+        std::map<std::string, std::vector<std::string>> byName;
+        for (auto& [id, t] : templates)
+            byName[t.displayName].push_back(id);
+        int dupeCount = 0;
+        for (auto& [name, ids] : byName) {
+            if (ids.size() > 1) {
+                dupeCount++;
+                std::cerr << "[Prefab] ДУБЛЬ displayName \"" << name << "\": ";
+                for (auto& id : ids) std::cerr << "\"" << id << "\" ";
+                std::cerr << "\n";
+            }
+        }
+        if (dupeCount == 0)
+            std::cout << "[Prefab] Дублей нет — каталог чистый (" << templates.size() << " записей)\n";
+        else
+            std::cerr << "[Prefab] Найдено дублей: " << dupeCount << "\n";
+        return dupeCount;
+    }
+
     size_t count() const { return templates.size(); }
     void   clear() { templates.clear(); }
 

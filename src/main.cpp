@@ -17,14 +17,19 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #endif
 
 // ════════════════════════════════════════════════════════════════
 // СИСТЕМЫ
 // ════════════════════════════════════════════════════════════════
 #include "animation_system.hpp"
+#include "anim_state_machine.hpp"
 #include "entity_system.hpp"
 #include "scene_system.hpp"
+#include "trigger_system.hpp"
+#include "prefab_system.hpp"   // Этап 1: каталог префабов
+#include "quest_system.hpp"    // Этап 1: система квестов
 
 // ============================================================
 // CONSTANTS
@@ -90,6 +95,30 @@ struct Item {
 };
 
 // ════════════════════════════════════════════════════════════════
+// LOOT SYSTEM (Этап 3)
+// ════════════════════════════════════════════════════════════════
+enum class Rarity { COMMON, UNCOMMON, RARE, EPIC };
+static const char* rarityName(Rarity r){
+    switch(r){ case Rarity::UNCOMMON: return "Необычный"; case Rarity::RARE: return "Редкий";
+               case Rarity::EPIC:     return "Эпический"; default: return "Обычный"; }
+}
+static sf::Color rarityColor(Rarity r){
+    switch(r){ case Rarity::UNCOMMON: return sf::Color(50,200,100);
+               case Rarity::RARE:     return sf::Color(60,100,255);
+               case Rarity::EPIC:     return sf::Color(180,50,220);
+               default:               return sf::Color(180,180,180); }
+}
+
+struct LootDrop {
+    V2          pos;
+    Item        item;
+    Rarity      rarity;
+    float       lifeTime = 30.f;   // исчезает через 30 сек
+    float       bobTimer = 0.f;
+    bool        picked   = false;
+};
+
+// ════════════════════════════════════════════════════════════════
 // ENEMY
 // ════════════════════════════════════════════════════════════════
 struct Enemy {
@@ -107,6 +136,8 @@ struct Enemy {
     bool        aggroedByHit = false;
     float       animTime = 0;
     AnimationPlayer* animPlayer = nullptr;
+    AnimStateMachine stateMachine;
+    bool        deathProcessed = false;  // Этап 1: флаг обработки смерти (награды/квесты)
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -129,6 +160,7 @@ struct Player {
     bool  moving=false;
     int   facing=0;
     AnimationPlayer* animPlayer = nullptr;
+    AnimStateMachine stateMachine;
 };
 
 // ============================================================
@@ -226,6 +258,28 @@ void drawChibiEnemy(sf::RenderWindow& w, const Enemy& e, bool targeted, float ga
 // ============================================================
 struct Star { float x,y,speed,brightness; };
 
+// ════════════════════════════════════════════════════════════════
+// LOOT DROP — Этап 3
+// ════════════════════════════════════════════════════════════════
+struct LootDrop {
+    V2          pos;
+    std::string name;
+    int         rarity;   // 0=common 1=uncommon 2=rare 3=epic
+    float       life;     // время до исчезновения (30 сек)
+    bool        isGold;
+    int         goldAmt;
+    bool        pickedUp = false;
+};
+
+static sf::Color rarityColor(int r) {
+    switch(r) {
+        case 1: return sf::Color(30, 180, 80);    // uncommon зелёный
+        case 2: return sf::Color(60, 120, 220);   // rare синий
+        case 3: return sf::Color(150, 50, 220);   // epic фиолетовый
+        default: return sf::Color(160, 155, 150); // common серый
+    }
+}
+
 class GameEngine {
 public:
     sf::RenderWindow window;
@@ -263,6 +317,8 @@ public:
     std::vector<Enemy> enemies;
     Enemy* targetEnemy = nullptr;
 
+    std::vector<LootDrop> lootDrops;   // Этап 3: лут на земле
+
     std::vector<Particle> particles;
     std::vector<FloatingText> floatingTexts;
     sf::View camera;
@@ -275,11 +331,23 @@ public:
     EntitySystem entitySystem;
     uint32_t playerEntityId = 0;
 
+    // ── Этап 1: Prefab + Quest системы ───────────────────────────
+    PrefabCatalog prefabCatalog;
+    QuestSystem   questSystem;
+    // Последние строки квест-диалога (для HUD-уведомлений)
+    std::string   questNotification;
+    float         questNotifyTimer = 0.f;
+
     // Система сцен
     SceneManager sceneManager;
     float sceneTransitionTimer = 0.f;
     bool  sceneTransitioning   = false;
     std::string pendingSceneId;
+    float pendingSpawnX = -1.f;  // spawn offset при переходе через портал (-1 = использовать spawn сцены)
+    float pendingSpawnY = -1.f;
+
+    // Система триггеров
+    TriggerSystem triggerSystem;
 
     bool showStats=false, showInventory=false, showMap=false;
 
@@ -361,10 +429,34 @@ public:
             << gameConfig.playerSpawnX << "," << gameConfig.playerSpawnY
             << ") enemies=" << gameConfig.enemyCount << "\n";
     }
-
+    static sf::String U(const std::string& s) {
+        return sf::String::fromUtf8(s.begin(), s.end());
+    }
     GameEngine() : window(sf::VideoMode(WINDOW_W,WINDOW_H),"AETHORIA: Eternal Realms",sf::Style::Default) {
         window.setFramerateLimit(60);
         camera.setSize(WINDOW_W,WINDOW_H);
+
+        // Иконка окна — генерируем программно (логотип 32×32)
+        {
+            sf::Image icon;
+            icon.create(32, 32, sf::Color(0,0,0,0));
+            // Фон — тёмно-фиолетовый
+            for (unsigned y=0;y<32;y++) for (unsigned x=0;x<32;x++)
+                icon.setPixel(x, y, sf::Color(15, 10, 35));
+            // Золотой символ ⚔ — рисуем два пересекающихся прямоугольника
+            for (int i=4;i<28;i++) {
+                icon.setPixel(i, 16, sf::Color(220,170,50));
+                icon.setPixel(16, i, sf::Color(220,170,50));
+            }
+            // Ромб вокруг
+            for (int i=0;i<8;i++) {
+                icon.setPixel(16-i,   8+i,  sf::Color(180,100,220));
+                icon.setPixel(16+i,   8+i,  sf::Color(180,100,220));
+                icon.setPixel(16-i,  24-i,  sf::Color(180,100,220));
+                icon.setPixel(16+i,  24-i,  sf::Color(180,100,220));
+            }
+            window.setIcon(32, 32, icon.getPixelsPtr());
+        }
         std::mt19937 rng2(123);
         for(int i=0;i<200;i++){
             Star s;
@@ -393,6 +485,10 @@ public:
     }
 
     void loadAssets() {
+#ifdef _WIN32
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
+#endif
         std::setlocale(LC_ALL,"");
         const char* fontPaths[]={
             "assets/fonts/arial.ttf","assets/fonts/cinzel.ttf",
@@ -484,6 +580,43 @@ public:
         }
         std::cout << "[SceneManager] Зарегистрировано сцен: "
                   << sceneManager.sceneOrder().size() << "\n";
+
+        // ── Загружаем связи порталов ──────────────────────────────
+        sceneManager.loadPortalLinks("assets/portal_links.json");
+
+        // ── Инициализируем систему триггеров ──────────────────────
+        // Колбэк: переход в сцену с заданным spawn-offset
+        triggerSystem.onSceneSwitch = [this](const std::string& sceneId,
+                                             float spawnX, float spawnY) {
+            pendingSpawnX = spawnX * TILE;   // тайлы → пиксели
+            pendingSpawnY = spawnY * TILE;
+            switchToScene(sceneId);
+        };
+        // Колбэк: диалог/сообщение
+        triggerSystem.onDialogue = [this](const std::string& text, float dur) {
+            dialogText  = text;
+            dialogTimer = dur;
+        };
+        // Колбэк: частицы на позиции триггера
+        triggerSystem.onParticles = [this](float x, float y) {
+            spawnParticles({x, y}, ParticleT::MAGIC, 15);
+        };
+        // Колбэк: проверка уровня
+        triggerSystem.onLevelCheck = [this](int req, const std::string& msg) -> bool {
+            if (player.level < req) {
+                dialogText  = msg;
+                dialogTimer = 3.f;
+                return false;
+            }
+            return true;
+        };
+        // Колбэк: вход в инстанс (серверную сцену)
+        triggerSystem.onInstanceEnter = [this](const std::string& instanceId) {
+            switchToScene(instanceId);
+        };
+
+        // Загружаем триггеры и серверные сцены из JSON
+        triggerSystem.loadFromFile("assets/triggers.json");
     }
 
     void loadStartScene() {
@@ -506,6 +639,18 @@ public:
             buildMap();    // fallback если нет ни одного файла сцены
             spawnEnemies();
         }
+
+        // ── Этап 1: Prefab catalog ────────────────────────────────
+        AethoriaPrefabFactory::registerDefaults(prefabCatalog);
+        // Загружаем пользовательские префабы поверх (если файл есть)
+        prefabCatalog.load("assets/prefabs.json");
+        prefabCatalog.validateDuplicates();
+
+        // ── Этап 1: Quest system ──────────────────────────────────
+        if (!questSystem.load("assets/quests.json")) {
+            std::cout << "[Quest] Квестов нет — создаём файл по умолчанию\n";
+        }
+        questSystem.printStatus();
     }
 
     void applySceneData(const SceneData& sd) {
@@ -540,6 +685,66 @@ public:
                   << sd.spawnX << "," << sd.spawnY
                   << ") фонтанов=" << fountains.size()
                   << " врагов=" << mapEnemyDefs.size() << "\n";
+
+        // ── Перестраиваем триггеры порталов для новой сцены ──────────
+        // Удаляем старые portal-триггеры (по префиксу "portal_link_")
+        {
+            auto& all = triggerSystem.all();
+            all.erase(std::remove_if(all.begin(), all.end(), [](const Trigger& t){
+                return t.id.size() >= 12 &&
+                       t.id.substr(0, 12) == "portal_link_";
+            }), all.end());
+        }
+        // Создаём новые триггеры на основе portal_links для текущей сцены
+        for (auto& pl : sd.portalLinks) {
+            // Ищем сущность-портал по имени / ID в entitySystem
+            for (auto& ent : entitySystem.getAll()) {
+                if (ent.type != EntityType::PORTAL) continue;
+                // Совпадение по portal_id в props или по имени
+                std::string eid = ent.props.getStr("portal_id", "");
+                if (eid.empty()) eid = ent.name;
+                if (eid != pl.portalId) continue;
+
+                Trigger t;
+                t.id           = "portal_link_" + pl.portalId;
+                t.name         = pl.label.empty() ? ("→ " + pl.toScene) : pl.label;
+                t.shape        = TriggerShape::CIRCLE;
+                t.x            = ent.x;
+                t.y            = ent.y;
+                t.radius       = 40.f;
+                t.event        = TriggerEvent::ENTER;
+                t.action       = TriggerAction::SCENE_SWITCH;
+                t.targetScene  = pl.toScene;
+                t.spawnOffsetX = pl.spawnX;
+                t.spawnOffsetY = pl.spawnY;
+                triggerSystem.add(t);
+                std::cout << "[Trigger] Портал " << pl.portalId
+                          << " → " << pl.toScene << " зарегистрирован\n";
+            }
+        }
+        // Дополнительно: порталы у которых target_zone задан напрямую в props
+        for (auto& ent : entitySystem.getAll()) {
+            if (ent.type != EntityType::PORTAL) continue;
+            std::string dest = ent.props.getStr("target_zone", "");
+            if (dest.empty()) continue;
+            std::string tid = "portal_direct_" + std::to_string(ent.id);
+            // Не дублируем если уже есть portal_link
+            if (triggerSystem.find(tid)) continue;
+            // Проверяем нет ли уже portal_link для этого портала
+            std::string pid = ent.props.getStr("portal_id", ent.name);
+            if (triggerSystem.find("portal_link_" + pid)) continue;
+            Trigger t;
+            t.id          = tid;
+            t.name        = "→ " + dest;
+            t.shape       = TriggerShape::CIRCLE;
+            t.x           = ent.x;
+            t.y           = ent.y;
+            t.radius      = 40.f;
+            t.event       = TriggerEvent::ENTER;
+            t.action      = TriggerAction::SCENE_SWITCH;
+            t.targetScene = dest;
+            triggerSystem.add(t);
+        }
     }
 
     void switchToScene(const std::string& sceneId) {
@@ -550,6 +755,13 @@ public:
         std::cout << "[Scene] Переключение → " << sceneId << "\n";
     }
 
+    // Перегрузка с явным spawn-offset (вызывается из triggerSystem.onSceneSwitch)
+    void switchToScene(const std::string& sceneId, float spawnPxX, float spawnPxY) {
+        pendingSpawnX = spawnPxX;
+        pendingSpawnY = spawnPxY;
+        switchToScene(sceneId);
+    }
+
     void updateSceneTransition(float dt) {
         if (!sceneTransitioning) return;
         sceneTransitionTimer -= dt;
@@ -558,6 +770,14 @@ public:
             sceneManager.switchScene(pendingSceneId, entitySystem,
                 worldMap, MAP_W, MAP_H,
                 player.pos.x, player.pos.y);
+            // Применяем кастомный spawn-offset если задан порталом
+            if (pendingSpawnX >= 0.f && pendingSpawnY >= 0.f) {
+                player.pos = {pendingSpawnX, pendingSpawnY};
+                camera.setCenter(player.pos.x, player.pos.y);
+                entitySystem.setPosition(playerEntityId, player.pos.x, player.pos.y);
+            }
+            pendingSpawnX = -1.f;
+            pendingSpawnY = -1.f;
             pendingSceneId.clear();
         }
     }
@@ -626,6 +846,9 @@ public:
             player.animPlayer = new AnimationPlayer(animManager);
             player.animPlayer->playAnimation("player", "idle");
             player.animPlayer->setScale(1.2f, 1.2f);
+            player.stateMachine = AnimStateMachine(player.animPlayer, "player");
+            player.stateMachine.setClipOverride(AnimState::RUN,  "run");
+            player.stateMachine.setClipOverride(AnimState::WALK, "walk");
             std::cout << "[OK] Анимация игрока инициализирована" << std::endl;
         }
         EntityProperties pp;
@@ -673,6 +896,7 @@ public:
                     } else {
                         float sc = e.boss ? 1.2f : 0.8f;
                         e.animPlayer->setScale(sc, sc);
+                        e.stateMachine = AnimStateMachine(e.animPlayer, ename);
                     }
                 }
                 enemies.push_back(e);
@@ -714,6 +938,7 @@ public:
                 } else {
                     float sc = e.boss ? 1.2f : 0.8f;
                     e.animPlayer->setScale(sc, sc);
+                    e.stateMachine = AnimStateMachine(e.animPlayer, entityName);
                 }
             }
             enemies.push_back(e);
@@ -735,6 +960,11 @@ public:
     // ВЗАИМОДЕЙСТВИЕ [E] и диалоги
     // ════════════════════════════════════════════════════════════════
     void tryInteract() {
+        // ── Сначала проверяем INTERACT-триггеры ──────────────────────
+        std::string triggerId = triggerSystem.tryInteract(
+            player.pos.x, player.pos.y, player.level);
+        if (!triggerId.empty()) return;   // триггер обработан
+
         float bestDist = interactRange * interactRange;
         Entity* target = nullptr;
         for (auto& e : entitySystem.getAll()) {
@@ -756,7 +986,26 @@ public:
             } else if(sub=="VENDOR") {
                 dialogText += "Добро пожаловать! Лучшие товары в Аэтории!";
             } else if(sub=="QUEST") {
-                dialogText += "У меня есть задание для храброго авантюриста...";
+                // Этап 1: полноценный квест-диалог через QuestSystem
+                std::string qid = target->props.getStr("quest_id", "");
+                auto ir = questSystem.interact(qid, player.level);
+                dialogText = target->name + ": " + ir.allLines();
+                if (ir.questAssigned) {
+                    questNotification = "Квест принят!";
+                    questNotifyTimer   = 5.f;
+                }
+                if (ir.questComplete) {
+                    player.gold += ir.goldRewarded;
+                    player.xp   += ir.xpRewarded;
+                    for (auto& itm : ir.items)
+                        player.inventory.push_back({itm, "quest_reward", 1, 0, 0, 0});
+                    spawnParticles(player.pos, ParticleT::HEAL, 20);
+                    questNotification = "Квест выполнен! +" +
+                        std::to_string(ir.xpRewarded) + " XP  +" +
+                        std::to_string(ir.goldRewarded) + "g";
+                    questNotifyTimer = 6.f;
+                    questSystem.onTalk(target->name);
+                }
             } else if(sub=="BLACKSMITH") {
                 dialogText += "Нужно оружие? Сталь Борга — лучшая в мире!";
             } else if(sub=="INNKEEPER") {
@@ -784,14 +1033,25 @@ public:
             break;
         }
         case EntityType::PORTAL: {
-            std::string dest=target->props.getStr("target_zone","");
-            if (!dest.empty()) {
-                switchToScene(dest);
+            // Сначала смотрим portal_links по portal_id сущности
+            std::string pid  = target->props.getStr("portal_id", target->name);
+            const PortalLink* link = sceneManager.getLinkByPortalId(pid);
+            if (link) {
+                pendingSpawnX = link->spawnX * TILE;
+                pendingSpawnY = link->spawnY * TILE;
+                spawnParticles({player.pos.x, player.pos.y}, ParticleT::MAGIC, 20);
+                switchToScene(link->toScene);
             } else {
-                dialogText = "Телепортация: " + (dest.empty()?"неизвестно":dest);
-                dialogTimer = 2.f;
+                // Фолбэк: target_zone напрямую в props
+                std::string dest = target->props.getStr("target_zone","");
+                if (!dest.empty()) {
+                    switchToScene(dest);
+                } else {
+                    dialogText  = "Портал не настроен. Нет цели.";
+                    dialogTimer = 2.f;
+                }
+                spawnParticles({player.pos.x,player.pos.y},ParticleT::MAGIC,20);
             }
-            spawnParticles({player.pos.x,player.pos.y},ParticleT::MAGIC,20);
             break;
         }
         case EntityType::ITEM_DROP: {
@@ -819,7 +1079,7 @@ public:
             sf::Color(20,10,35,uint8_t(alpha*0.92f)),
             sf::Color(140,80,220,uint8_t(alpha)),2);
         sf::Text txt; txt.setFont(font);
-        txt.setString(dialogText);
+        txt.setString(U(dialogText));
         txt.setCharacterSize(15);
         txt.setFillColor(sf::Color(230,210,255,uint8_t(alpha)));
         auto b=txt.getLocalBounds();
@@ -992,6 +1252,22 @@ public:
         updateParticles(dt);
         updateFloatTexts(dt);
         if (dialogTimer>0.f) dialogTimer-=dt;
+        if (questNotifyTimer>0.f) questNotifyTimer-=dt;
+
+        // ── Этап 1: Обработка смерти врагов (XP/gold/квесты) ─────
+        for (auto& e : enemies) {
+            if (e.hp <= 0 && !e.deathProcessed) {
+                e.deathProcessed = true;
+                onEnemyKilled(e);
+            }
+        }
+
+        // ── Триггеры: автоматические (ENTER/LEAVE/TIMER) ──────────
+        triggerSystem.update(player.pos.x, player.pos.y, dt, player.level);
+        triggerSystem.updateCooldowns(dt);
+
+        // ── Этап 3: Лут ───────────────────────────────────────────
+        updateLoot(dt);
         enemies.erase(std::remove_if(enemies.begin(),enemies.end(),
             [this](const Enemy& e){
                 bool dead = e.hp<=0 && e.state!=EnemyState::IDLE;
@@ -1008,123 +1284,141 @@ public:
     }
 
     void updatePlayer(float dt){
-        V2 dir;
-        bool wasMoving=player.moving;
-        if(sf::Keyboard::isKeyPressed(sf::Keyboard::W)){dir.y-=1;player.facing=1;}
-        if(sf::Keyboard::isKeyPressed(sf::Keyboard::S)){dir.y+=1;player.facing=0;}
-        if(sf::Keyboard::isKeyPressed(sf::Keyboard::A)){dir.x-=1;player.facing=2;}
-        if(sf::Keyboard::isKeyPressed(sf::Keyboard::D)){dir.x+=1;player.facing=3;}
-        player.moving=(dir.len()>0);
-        if(player.moving){
-            V2 newPos=player.pos+dir.norm()*player.speed*dt;
-            int tx=(int)(newPos.x/TILE),ty=(int)(newPos.y/TILE);
-            if(tx>=0&&ty>=0&&tx<MAP_W&&ty<MAP_H&&worldMap[ty][tx].walkable)
-                player.pos=newPos;
-            player.animTime+=dt;
-        }
-        if(player.currentAttackCD>0) player.currentAttackCD-=dt;
-        if(player.comboTimer>0) player.comboTimer-=dt; else player.combo=0;
-        for(auto& s:player.skills) if(s.currentCooldown>0) s.currentCooldown-=dt;
-        player.hp=std::min(player.maxHp,player.hp+3.f*dt);
-        player.mp=std::min(player.maxMp,player.mp+2.f*dt);
-        camera.setCenter(player.pos.x,player.pos.y);
-        entitySystem.setPosition(playerEntityId, player.pos.x, player.pos.y);
-        if (player.animPlayer) {
-            if (player.moving) {
-                if (player.animPlayer->getCurrentAction() != "run")
-                    player.animPlayer->playAnimation("player", "run");
-            } else {
-                if (player.animPlayer->getCurrentAction() != "idle")
-                    player.animPlayer->playAnimation("player", "idle");
-            }
-            player.animPlayer->update(dt);
-            player.animPlayer->setPosition(player.pos.x, player.pos.y);
-            float baseScale = 1.2f;
-            if (player.facing == 2) player.animPlayer->setScale(-baseScale, baseScale);
-            else player.animPlayer->setScale(baseScale, baseScale);
-        }
+    V2 dir;
+    bool wasMoving = player.moving;
+    if(sf::Keyboard::isKeyPressed(sf::Keyboard::W)) dir.y -= 1;
+    if(sf::Keyboard::isKeyPressed(sf::Keyboard::S)) dir.y += 1;
+    if(sf::Keyboard::isKeyPressed(sf::Keyboard::A)) dir.x -= 1;
+    if(sf::Keyboard::isKeyPressed(sf::Keyboard::D)) dir.x += 1;
+
+    // Сохраняем сырой X ДО нормализации — нужен для facing
+    float rawDirX = dir.x;
+
+    player.moving = (dir.len() > 0);
+    if(player.moving){
+        V2 newPos = player.pos + dir.norm() * player.speed * dt;
+        int tx = (int)(newPos.x / TILE), ty = (int)(newPos.y / TILE);
+        if(tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H && worldMap[ty][tx].walkable)
+            player.pos = newPos;
+        player.animTime += dt;
     }
 
+    if(player.currentAttackCD > 0) player.currentAttackCD -= dt;
+    if(player.comboTimer > 0)      player.comboTimer -= dt;
+    else                           player.combo = 0;
+
+    for(auto& s : player.skills)
+        if(s.currentCooldown > 0) s.currentCooldown -= dt;
+
+    // Пассивная регенерация
+    player.hp = std::min(player.maxHp, player.hp + 3.f * dt);
+    player.mp = std::min(player.maxMp, player.mp + 2.f * dt);
+
+    camera.setCenter(player.pos.x, player.pos.y);
+    entitySystem.setPosition(playerEntityId, player.pos.x, player.pos.y);
+
+    if (player.animPlayer) {
+        // AnimStateMachine управляет переходами
+        if (player.moving)
+            player.stateMachine.setState(AnimState::RUN);
+        else
+            player.stateMachine.setState(AnimState::IDLE);
+
+        player.stateMachine.updateFacingFromVelocity(rawDirX);
+        player.stateMachine.update(dt);
+        player.stateMachine.setPosition(player.pos.x, player.pos.y);
+    }
+}
+
     void updateEnemies(float dt){
-        for(auto& e:enemies){
-            if(e.hp<=0) continue;
-            e.animTime+=dt;
-            float dPlayer=dist(e.pos,player.pos);
-            switch(e.state){
-            case EnemyState::IDLE:
-            case EnemyState::PATROL:
-                if(dPlayer<AGGRO_RANGE||e.aggroedByHit){e.state=EnemyState::AGGRO;e.aggroedByHit=false;}
-                else{
-                    e.aiTimer-=dt;
-                    if(e.aiTimer<=0){
-                        e.aiTimer=2.f+(float)(rand()%3);
-                        e.patrolTarget=e.spawnPos+V2((rand()%160)-80.f,(rand()%160)-80.f);
-                        e.state=EnemyState::PATROL;
-                    }
-                    if(e.state==EnemyState::PATROL){
-                        V2 toDest=e.patrolTarget-e.pos;
-                        if(toDest.len()<20.f){e.state=EnemyState::IDLE;e.aiTimer=1.f;}
-                        else {
-                            V2 move=toDest.norm()*e.speed*dt;
-                            e.pos=e.pos+move;
-                            if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
-                        }
-                    }
+    for(auto& e : enemies){
+        if(e.hp <= 0) continue;
+        e.animTime += dt;
+        float dPlayer = dist(e.pos, player.pos);
+
+        switch(e.state){
+        case EnemyState::IDLE:
+        case EnemyState::PATROL:
+            if(dPlayer < AGGRO_RANGE || e.aggroedByHit){
+                e.state = EnemyState::AGGRO;
+                e.aggroedByHit = false;
+            }
+            else{
+                e.aiTimer -= dt;
+                if(e.aiTimer <= 0){
+                    e.aiTimer = 2.f + (float)(rand() % 3);
+                    e.patrolTarget = e.spawnPos + V2((rand()%160)-80.f, (rand()%160)-80.f);
+                    e.state = EnemyState::PATROL;
                 }
-                break;
-            case EnemyState::AGGRO:{
-                V2 toPlayer=player.pos-e.pos;
-                float d=toPlayer.len();
-                if(d<DEAGGRO_RANGE){
-                    if(d>40.f){
-                        V2 move=toPlayer.norm()*e.speed*dt;
-                        e.pos=e.pos+move;
+                if(e.state == EnemyState::PATROL){
+                    V2 toDest = e.patrolTarget - e.pos;
+                    if(toDest.len() < 20.f){
+                        e.state  = EnemyState::IDLE;
+                        e.aiTimer = 1.f;
+                    } else {
+                        V2 move = toDest.norm() * e.speed * dt;
+                        e.pos = e.pos + move;
                         if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
                     }
-                    else e.state=EnemyState::COMBAT;
-                } else e.state=EnemyState::PATROL;
-                break;}
-            case EnemyState::COMBAT:{
-                float d=dist(e.pos,player.pos);
-                if(d>DEAGGRO_RANGE) e.state=EnemyState::PATROL;
-                else{
-                    e.currentAttackCD-=dt;
-                    if(e.currentAttackCD<=0){
-                        player.hp-=e.damage*0.8f;
-                        e.currentAttackCD=1.2f;
-                        spawnParticles(player.pos,ParticleT::BLOOD,8);
-                    }
                 }
-                break;}
-            case EnemyState::RETURN:
-                if(dist(e.pos,e.spawnPos)<10.f) {e.pos=e.spawnPos;e.state=EnemyState::IDLE;}
-                else {
-                    V2 move=(e.spawnPos-e.pos).norm()*e.speed*dt;
-                    e.pos=e.pos+move;
+            }
+            break;
+
+        case EnemyState::AGGRO:{
+            V2 toPlayer = player.pos - e.pos;
+            float d = toPlayer.len();
+            if(d < DEAGGRO_RANGE){
+                if(d > 40.f){
+                    V2 move = toPlayer.norm() * e.speed * dt;
+                    e.pos = e.pos + move;
                     if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
                 }
-                break;
-            default:break;
-            }
-            if (e.animPlayer) {
-                // Переключаем анимацию в зависимости от состояния
-                std::string entityName = getEntityName(e.type);
-                bool isMoving = (e.state == EnemyState::PATROL ||
-                                 e.state == EnemyState::AGGRO  ||
-                                 e.state == EnemyState::RETURN);
-                std::string wantedAnim = isMoving ? "walk" : "idle";
-                // Фолбэк: если walk нет — оставляем idle
-                if (wantedAnim == "walk" && e.animPlayer->getCurrentAction() != "walk") {
-                    if (!e.animPlayer->playAnimation(entityName, "walk"))
-                        e.animPlayer->playAnimation(entityName, "idle");
-                } else if (wantedAnim == "idle" && e.animPlayer->getCurrentAction() != "idle") {
-                    e.animPlayer->playAnimation(entityName, "idle");
+                else e.state = EnemyState::COMBAT;
+            } else e.state = EnemyState::PATROL;
+            break;}
+
+        case EnemyState::COMBAT:{
+            float d = dist(e.pos, player.pos);
+            if(d > DEAGGRO_RANGE) e.state = EnemyState::PATROL;
+            else {
+                // ИСПРАВЛЕНИЕ: враг смотрит на игрока даже в COMBAT
+                if(e.animPlayer)
+                    e.animPlayer->updateFacingFromVelocity(player.pos.x - e.pos.x);
+
+                e.currentAttackCD -= dt;
+                if(e.currentAttackCD <= 0){
+                    player.hp -= e.damage * 0.8f;
+                    e.currentAttackCD = 1.2f;
+                    spawnParticles(player.pos, ParticleT::BLOOD, 8);
                 }
-                e.animPlayer->update(dt);
-                e.animPlayer->setPosition(e.pos.x, e.pos.y);
             }
+            break;}
+
+        case EnemyState::RETURN:
+            if(dist(e.pos, e.spawnPos) < 10.f){
+                e.pos   = e.spawnPos;
+                e.state = EnemyState::IDLE;
+            } else {
+                V2 move = (e.spawnPos - e.pos).norm() * e.speed * dt;
+                e.pos = e.pos + move;
+                if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+            }
+            break;
+
+        default: break;
+        }
+
+        if(e.animPlayer){
+            bool isMoving = (e.state == EnemyState::PATROL ||
+                             e.state == EnemyState::AGGRO  ||
+                             e.state == EnemyState::RETURN);
+            // stateMachine: state + facing уже обновлены выше в логике движения
+            e.stateMachine.setState(isMoving ? AnimState::WALK : AnimState::IDLE);
+            e.stateMachine.update(dt);
+            e.stateMachine.setPosition(e.pos.x, e.pos.y);
         }
     }
+}
 
     void updateParticles(float dt){
         for(auto& p:particles){
@@ -1158,6 +1452,60 @@ public:
         }
     }
 
+    // ════════════════════════════════════════════════════════════
+    // ЭТАП 1: Обработка убийства врага
+    // XP, gold, kills, quest progress, level-up check
+    // ════════════════════════════════════════════════════════════
+    void onEnemyKilled(const Enemy& e) {
+        // ── 1. Очки опыта ─────────────────────────────────────────
+        int xpGain = 10 + e.level * 5 + (e.boss ? 100 : 0);
+        player.xp += xpGain;
+        player.kills++;
+
+        // Floating XP text
+        floatingTexts.push_back({e.pos + V2(0, -20),
+            "+" + std::to_string(xpGain) + " XP", 2.f, sf::Color(120, 220, 120), false});
+
+        // ── 2. Золото ─────────────────────────────────────────────
+        int goldGain = e.gold > 0 ? e.gold : (5 + e.level * 3);
+        if (e.boss) goldGain *= 3;
+        player.gold += goldGain;
+        floatingTexts.push_back({e.pos + V2(0, -36),
+            "+" + std::to_string(goldGain) + "g", 2.f, sf::Color(255, 210, 60), false});
+
+        // ── 3. Квест-прогресс ─────────────────────────────────────
+        auto results = questSystem.onKill(e.name);
+        for (auto& r : results) {
+            // Дополнительная награда за выполнение квеста
+            player.xp   += r.xpRewarded;
+            player.gold += r.goldRewarded;
+            for (auto& itm : r.itemsRewarded)
+                player.inventory.push_back({itm, "quest_reward", 1, 0, 0, 0});
+            questNotification = "Квест выполнен: " + r.questName +
+                "\n+" + std::to_string(r.xpRewarded) + " XP  +" +
+                std::to_string(r.goldRewarded) + "g";
+            questNotifyTimer = 6.f;
+            spawnParticles(player.pos, ParticleT::HEAL, 25);
+        }
+
+        // ── 4. Level-up ───────────────────────────────────────────
+        while (player.xp >= player.xpNext) {
+            player.xp -= player.xpNext;
+            player.level++;
+            player.xpNext = 100 + player.level * 50;
+            player.maxHp += 10; player.hp = player.maxHp;
+            player.maxMp += 5;  player.mp = player.maxMp;
+            player.baseAtk += 2; player.baseDef += 1;
+            floatingTexts.push_back({player.pos + V2(0, -50),
+                "LEVEL UP! Lv." + std::to_string(player.level),
+                3.f, sf::Color(255, 220, 50), true});
+            spawnParticles(player.pos, ParticleT::CRITICAL, 30);
+        }
+
+        // ── 5. Этап 3: Лут ────────────────────────────────────────
+        spawnLoot(e.pos, e.level, e.boss);
+    }
+
     void spawnParticles(V2 pos, ParticleT type, int count){
         for(int i=0;i<count;i++){
             Particle p;
@@ -1172,6 +1520,110 @@ public:
             else if(type==ParticleT::HEAL)  p.color=sf::Color(100,255,100);
             else                            p.color=sf::Color(255,200,50);
             particles.push_back(p);
+        }
+    }
+
+    // ── Этап 3: Лут ───────────────────────────────────────────
+    void spawnLoot(V2 pos, int enemyLevel, bool boss) {
+        static const char* commonItems[]  = {"Меч", "Лук", "Кинжал", "Топор", "Посох"};
+        static const char* rareItems[]    = {"Клинок теней", "Лунный лук", "Реликвия"};
+        static const char* epicItems[]    = {"Меч Бездны", "Корона Хаоса", "Камень душ"};
+
+        // Золото — всегда
+        {
+            LootDrop g;
+            g.pos     = pos + V2((rand()%24)-12, (rand()%24)-12);
+            g.isGold  = true;
+            g.goldAmt = (5 + enemyLevel * 3) * (boss ? 5 : 1) + rand() % 10;
+            g.name    = std::to_string(g.goldAmt) + "g";
+            g.rarity  = 0;
+            g.life    = 30.f;
+            lootDrops.push_back(g);
+        }
+
+        // Предмет — по шансу
+        int roll = rand() % 100;
+        int threshold = boss ? 10 : (50 - enemyLevel * 3);  // боссы почти гарантируют дроп
+        threshold = std::max(threshold, 5);
+        if (roll >= threshold) return;
+
+        LootDrop d;
+        d.pos    = pos + V2((rand()%32)-16, (rand()%32)-16);
+        d.isGold = false;
+        d.life   = 30.f;
+
+        if (boss || roll < 5) {
+            d.rarity = 3;
+            d.name   = epicItems[rand() % 3];
+        } else if (roll < 15 || enemyLevel >= 3) {
+            d.rarity = 2;
+            d.name   = rareItems[rand() % 3];
+        } else if (roll < 30) {
+            d.rarity = 1;
+            d.name   = commonItems[rand() % 5];
+        } else {
+            d.rarity = 0;
+            d.name   = commonItems[rand() % 5];
+        }
+        lootDrops.push_back(d);
+    }
+
+    void updateLoot(float dt) {
+        // Подбор
+        for (auto& l : lootDrops) {
+            if (l.pickedUp) continue;
+            l.life -= dt;
+            if (l.life <= 0) { l.pickedUp = true; continue; }
+            float dx = player.pos.x - l.pos.x, dy = player.pos.y - l.pos.y;
+            if (dx*dx + dy*dy < 24.f*24.f) {
+                l.pickedUp = true;
+                if (l.isGold) {
+                    player.gold += l.goldAmt;
+                    floatingTexts.push_back({player.pos+V2(0,-24),
+                        "+"+std::to_string(l.goldAmt)+"g", 1.5f, sf::Color(255,215,0), false});
+                } else {
+                    player.inventory.push_back({l.name, "drop", l.rarity, 5+l.rarity*5, 0, 0});
+                    floatingTexts.push_back({player.pos+V2(0,-24),
+                        l.name, 1.5f, rarityColor(l.rarity), false});
+                    spawnParticles(player.pos, ParticleT::MAGIC, 6);
+                }
+            }
+        }
+        lootDrops.erase(std::remove_if(lootDrops.begin(), lootDrops.end(),
+            [](const LootDrop& l){ return l.pickedUp; }), lootDrops.end());
+    }
+
+    void drawLoot() {
+        for (auto& l : lootDrops) {
+            float pulse = 0.7f + 0.3f * std::sin(gameTime * 4.f + l.pos.x);
+            sf::Color col = rarityColor(l.rarity);
+
+            if (l.isGold) {
+                // Монета
+                sf::CircleShape coin(6);
+                coin.setOrigin(6,6);
+                coin.setPosition(l.pos.x, l.pos.y);
+                coin.setFillColor(sf::Color(220, 185, 30, uint8_t(200*pulse)));
+                coin.setOutlineColor(sf::Color(255,220,60));
+                coin.setOutlineThickness(1.f);
+                window.draw(coin);
+            } else {
+                // Предмет — ромб
+                sf::ConvexShape gem;
+                gem.setPointCount(4);
+                float s = 7.f + l.rarity * 2.f;
+                gem.setPoint(0, {0, -s});
+                gem.setPoint(1, {s*0.6f, 0});
+                gem.setPoint(2, {0, s});
+                gem.setPoint(3, {-s*0.6f, 0});
+                gem.setOrigin(0, 0);
+                gem.setPosition(l.pos.x, l.pos.y);
+                col.a = uint8_t(180 * pulse);
+                gem.setFillColor(col);
+                gem.setOutlineColor(sf::Color(255,255,255,100));
+                gem.setOutlineThickness(1.f);
+                window.draw(gem);
+            }
         }
     }
 
@@ -1190,6 +1642,8 @@ public:
         window.setView(camera);
         if(gameConfig.layerGround)   drawMap();
         if(gameConfig.layerObjects)  drawEntities();
+        drawTriggerZones();
+        drawLoot();           // Этап 3: лут лежит под ногами
         drawEnemies();
         if(gameConfig.layerEffects)  drawParticles();
         if(gameConfig.layerEntities) drawPlayer();
@@ -1329,7 +1783,7 @@ public:
         // City name sign
         if(fontLoaded){
             sf::Text label; label.setFont(font);
-            label.setString("~ Aethoria City ~");
+            label.setString(U("~ Aethoria City ~"));
             label.setCharacterSize(15);
             label.setFillColor(sf::Color(240,220,160,200));
             label.setStyle(sf::Text::Bold);
@@ -1397,7 +1851,7 @@ public:
                 }
                 if(fontLoaded) {
                     sf::Text nm; nm.setFont(font);
-                    nm.setString(e.name);
+                    nm.setString(U(e.name));
                     nm.setCharacterSize(11);
                     nm.setFillColor(sf::Color(240,230,180,230));
                     auto b=nm.getLocalBounds();
@@ -1417,7 +1871,7 @@ public:
                     window.draw(ring);
                     if(fontLoaded) {
                         sf::Text hint; hint.setFont(font);
-                        hint.setString("[E]");
+                        hint.setString(U("[E]"));
                         hint.setCharacterSize(12);
                         hint.setFillColor(sf::Color(255,220,60));
                         auto b=hint.getLocalBounds();
@@ -1460,31 +1914,65 @@ public:
                 break;
             }
             case EntityType::PORTAL: {
-                float pulse = 0.85f + 0.15f*std::sin(gameTime*3.f);
-                sf::CircleShape outer(r*1.3f*pulse,30);
-                outer.setOrigin(r*1.3f*pulse,r*1.3f*pulse);
-                outer.setPosition(wx,wy);
-                outer.setFillColor(sf::Color(120,40,220,
-                    uint8_t(120+50*std::sin(gameTime*2))));
-                outer.setOutlineColor(sf::Color(200,140,255,200));
+                float pulse  = 0.85f + 0.15f * std::sin(gameTime * 3.f);
+                float spin   = gameTime * 1.5f;
+                // Внешнее кольцо — пульсирующее
+                sf::CircleShape outer(r * 1.3f * pulse, 30);
+                outer.setOrigin(r*1.3f*pulse, r*1.3f*pulse);
+                outer.setPosition(wx, wy);
+                outer.setFillColor(sf::Color(120, 40, 220,
+                    uint8_t(120 + 50*std::sin(gameTime*2))));
+                outer.setOutlineColor(sf::Color(200, 140, 255, 200));
                 outer.setOutlineThickness(3);
                 window.draw(outer);
-                sf::CircleShape inner(r*0.6f*pulse,20);
-                inner.setOrigin(r*0.6f*pulse,r*0.6f*pulse);
-                inner.setPosition(wx,wy);
-                inner.setFillColor(sf::Color(220,180,255,
-                    uint8_t(180+60*std::sin(gameTime*5))));
+                // Внутреннее ядро
+                sf::CircleShape inner(r * 0.6f * pulse, 20);
+                inner.setOrigin(r*0.6f*pulse, r*0.6f*pulse);
+                inner.setPosition(wx, wy);
+                inner.setFillColor(sf::Color(220, 180, 255,
+                    uint8_t(180 + 60*std::sin(gameTime*5))));
                 window.draw(inner);
-                if(fontLoaded) {
+                // Вращающиеся орбитальные точки
+                for (int oi = 0; oi < 4; oi++) {
+                    float a = spin + oi * 3.14159f * 0.5f;
+                    float ox = std::cos(a) * r * 1.5f;
+                    float oy = std::sin(a) * r * 0.6f;  // приплюснуто — эллипс
+                    sf::CircleShape orb(3, 8);
+                    orb.setOrigin(3,3);
+                    orb.setPosition(wx + ox, wy + oy);
+                    orb.setFillColor(sf::Color(220, 160, 255,
+                        uint8_t(160 + 60*std::sin(gameTime*3 + oi))));
+                    window.draw(orb);
+                }
+                // Метка из portal_links или target_zone
+                if (fontLoaded) {
+                    std::string pid  = e.props.getStr("portal_id", e.name);
+                    const PortalLink* link = sceneManager.getLinkByPortalId(pid);
+                    std::string dest = link ? link->label
+                                           : e.props.getStr("target_zone","");
+                    if (dest.empty()) dest = "Портал";
                     sf::Text lbl; lbl.setFont(font);
-                    std::string dest=e.props.getStr("target_zone","");
-                    lbl.setString(dest.empty()?"Портал":dest);
+                    lbl.setString(U(dest));
                     lbl.setCharacterSize(11);
-                    lbl.setFillColor(sf::Color(220,180,255,220));
-                    auto b=lbl.getLocalBounds();
-                    lbl.setOrigin(b.width/2,b.height);
-                    lbl.setPosition(wx,wy-r*1.8f);
+                    lbl.setFillColor(sf::Color(220, 180, 255, 220));
+                    auto b = lbl.getLocalBounds();
+                    lbl.setOrigin(b.width/2, b.height);
+                    lbl.setPosition(wx, wy - r*1.9f);
                     window.draw(lbl);
+                }
+                // Подсказка [E] при близости
+                float dx = player.pos.x - wx, dy = player.pos.y - wy;
+                if (dx*dx + dy*dy < interactRange*interactRange && fontLoaded) {
+                    sf::Text hint; hint.setFont(font);
+                    hint.setString("[E]");
+                    hint.setCharacterSize(13);
+                    hint.setFillColor(sf::Color(255, 220, 60,
+                        uint8_t(200 + 55*std::sin(gameTime*5))));
+                    hint.setStyle(sf::Text::Bold);
+                    auto b = hint.getLocalBounds();
+                    hint.setOrigin(b.width/2, b.height);
+                    hint.setPosition(wx, wy - r*2.6f);
+                    window.draw(hint);
                 }
                 break;
             }
@@ -1500,7 +1988,7 @@ public:
                 float dx=player.pos.x-wx, dy=player.pos.y-wy;
                 if(dx*dx+dy*dy < interactRange*interactRange && fontLoaded) {
                     sf::Text hint; hint.setFont(font);
-                    hint.setString("[E] "+e.name);
+                    hint.setString(U("[E] "+e.name));
                     hint.setCharacterSize(11);
                     hint.setFillColor(sf::Color(255,220,60));
                     auto b=hint.getLocalBounds();
@@ -1511,6 +1999,82 @@ public:
                 break;
             }
             default: break;
+            }
+        }
+    }
+
+    // Визуализация триггерных зон (только не-портальные, полупрозрачно)
+    void drawTriggerZones() {
+        sf::Vector2f cc = camera.getCenter();
+        float cullW = WINDOW_W / 2.f + 128.f;
+        float cullH = WINDOW_H / 2.f + 128.f;
+        for (auto& t : triggerSystem.all()) {
+            if (!t.active) continue;
+            // Порталы уже рисуются как entity — не дублируем
+            if (t.id.size() >= 7 && t.id.substr(0,7) == "portal_") continue;
+
+            float tx = t.x, ty = t.y;
+            if (std::abs(tx - cc.x) > cullW || std::abs(ty - cc.y) > cullH) continue;
+
+            // Цвет по типу действия
+            sf::Color zoneColor;
+            switch (t.action) {
+                case TriggerAction::SCENE_SWITCH:   zoneColor = sf::Color(100,200,255,35); break;
+                case TriggerAction::SCENE_INSTANCE: zoneColor = sf::Color(255,100,50,35);  break;
+                case TriggerAction::DIALOGUE:       zoneColor = sf::Color(255,220,60,30);  break;
+                default:                            zoneColor = sf::Color(180,180,255,25); break;
+            }
+            sf::Color borderColor = zoneColor;
+            borderColor.a = uint8_t(60 + 30*std::sin(gameTime*2.5f));
+
+            if (t.shape == TriggerShape::CIRCLE) {
+                float r = t.radius;
+                sf::CircleShape zone(r, 24);
+                zone.setOrigin(r, r);
+                zone.setPosition(tx, ty);
+                zone.setFillColor(zoneColor);
+                zone.setOutlineColor(borderColor);
+                zone.setOutlineThickness(1.5f);
+                window.draw(zone);
+            } else {
+                sf::RectangleShape zone({t.w, t.h});
+                zone.setOrigin(t.w/2.f, t.h/2.f);
+                zone.setPosition(tx, ty);
+                zone.setFillColor(zoneColor);
+                zone.setOutlineColor(borderColor);
+                zone.setOutlineThickness(1.5f);
+                window.draw(zone);
+            }
+
+            // Метка внутри зоны
+            if (fontLoaded && !t.name.empty()) {
+                sf::Text lbl; lbl.setFont(font);
+                lbl.setString(t.name);
+                lbl.setCharacterSize(10);
+                lbl.setFillColor(sf::Color(200,200,255,
+                    uint8_t(140 + 60*std::sin(gameTime*2))));
+                auto b = lbl.getLocalBounds();
+                lbl.setOrigin(b.width/2, b.height/2);
+                lbl.setPosition(tx, ty);
+                window.draw(lbl);
+            }
+
+            // Подсказка [E] для INTERACT-триггеров
+            float dx = player.pos.x - tx, dy = player.pos.y - ty;
+            bool nearPlayer = (t.shape == TriggerShape::CIRCLE)
+                ? (dx*dx+dy*dy < (t.radius+16)*(t.radius+16))
+                : (std::abs(dx) < t.w/2+16 && std::abs(dy) < t.h/2+16);
+            if (nearPlayer && t.event == TriggerEvent::INTERACT && fontLoaded) {
+                sf::Text hint; hint.setFont(font);
+                hint.setString("[E] " + t.name);
+                hint.setCharacterSize(12);
+                hint.setFillColor(sf::Color(255,220,60,
+                    uint8_t(200 + 55*std::sin(gameTime*5))));
+                hint.setStyle(sf::Text::Bold);
+                auto b = hint.getLocalBounds();
+                hint.setOrigin(b.width/2, b.height);
+                hint.setPosition(tx, ty - t.radius - 14.f);
+                window.draw(hint);
             }
         }
     }
@@ -1590,10 +2154,61 @@ public:
         if(!fontLoaded) return;
         drawWorldBar(window, 20,20,200,20,player.hp/player.maxHp,sf::Color(200,50,50));
         drawWorldBar(window, 20,50,200,20,player.mp/player.maxMp,sf::Color(50,100,200));
-        sf::Text levelTxt; levelTxt.setFont(font); levelTxt.setString("Lvl "+std::to_string(player.level));
+        sf::Text levelTxt; levelTxt.setFont(font); levelTxt.setString(U("Lvl "+std::to_string(player.level)));
         levelTxt.setCharacterSize(16); levelTxt.setFillColor(sf::Color(200,200,100));
         levelTxt.setPosition(20,85);
         window.draw(levelTxt);
+
+        // XP bar
+        if (player.xpNext > 0) {
+            drawWorldBar(window, 20, 108, 200, 8,
+                (float)player.xp / player.xpNext, sf::Color(80, 180, 255));
+        }
+
+        // ── Этап 1: Активные квесты ───────────────────────────────
+        auto activeQs = questSystem.getActive();
+        float qy = 130.f;
+        for (auto* q : activeQs) {
+            sf::Text qt; qt.setFont(font);
+            qt.setString(U("● " + q->name));
+            qt.setCharacterSize(13); qt.setFillColor(sf::Color(220,200,100));
+            qt.setPosition(20, qy); window.draw(qt); qy += 16.f;
+            for (auto& obj : q->objectives) {
+                if (!obj.isComplete()) {
+                    sf::Text ot; ot.setFont(font);
+                    ot.setString(U("  " + obj.statusLine()));
+                    ot.setCharacterSize(12); ot.setFillColor(sf::Color(160,160,180));
+                    ot.setPosition(20, qy); window.draw(ot); qy += 14.f;
+                }
+            }
+        }
+
+        // ── Квест-уведомление (всплывает при выполнении/принятии) ──
+        if (questNotifyTimer > 0.f && !questNotification.empty()) {
+            float alpha = std::min(1.f, questNotifyTimer / 1.5f);
+            sf::RectangleShape bg({420, 56});
+            bg.setPosition(WINDOW_W/2 - 210, 20);
+            bg.setFillColor(sf::Color(20, 40, 20, (uint8_t)(200*alpha)));
+            bg.setOutlineColor(sf::Color(80, 200, 80, (uint8_t)(255*alpha)));
+            bg.setOutlineThickness(1.5f);
+            window.draw(bg);
+            sf::Text nt; nt.setFont(font);
+            nt.setString(U(questNotification));
+            nt.setCharacterSize(14);
+            nt.setFillColor(sf::Color(120, 255, 120, (uint8_t)(255*alpha)));
+            auto nb = nt.getLocalBounds();
+            nt.setOrigin(nb.width/2, nb.height/2);
+            nt.setPosition(WINDOW_W/2, 48);
+            window.draw(nt);
+        }
+
+        // Kills & gold (мини-строка)
+        sf::Text statsLine; statsLine.setFont(font);
+        statsLine.setString("Kills:" + std::to_string(player.kills) +
+                             "  Gold:" + std::to_string(player.gold));
+        statsLine.setCharacterSize(12); statsLine.setFillColor(sf::Color(140,130,160));
+        statsLine.setPosition(20, WINDOW_H - 20);
+        window.draw(statsLine);
     }
 
     void drawStatsPanel(){
@@ -1799,6 +2414,13 @@ public:
 };
 
 int main(){
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+    // Убираем кракозябру в заголовке консоли
+    SetConsoleTitleA("AETHORIA: Eternal Realms — Engine");
+#endif
+    std::setlocale(LC_ALL, ".UTF-8");
     GameEngine engine;
     engine.run();
     return 0;

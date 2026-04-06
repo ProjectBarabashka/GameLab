@@ -61,6 +61,19 @@ struct SceneEnemyDef {
     int         dmg      = 0;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// СВЯЗЬ ПОРТАЛ → СЦЕНА (хранится в portal_links.json)
+// ═══════════════════════════════════════════════════════════════
+struct PortalLink {
+    std::string portalId;       // ID портала-сущности в этой сцене (из entitySystem)
+    std::string fromScene;      // сцена-источник
+    std::string toScene;        // сцена-назначение
+    float       spawnX = 60.f;  // куда поставить игрока (в тайлах) в toScene
+    float       spawnY = 60.f;
+    std::string label;          // отображаемое имя ("→ Тёмный лес")
+    bool        bidirectional = false; // создать обратный портал автоматически
+};
+
 struct SceneData {
     std::string            id;
     std::string            name;
@@ -71,6 +84,7 @@ struct SceneData {
     float                  spawnY = 60.f * 32;
     std::vector<sf::Vector2i>  fountains;
     std::vector<SceneEnemyDef> enemyDefs;   // ← враги из JSON
+    std::vector<PortalLink>    portalLinks; // ← связи порталов
     bool loaded = false;
 };
 
@@ -145,6 +159,106 @@ public:
         if (std::find(order_.begin(),order_.end(),info.id)==order_.end())
             order_.push_back(info.id);
     }
+
+    // ── Загрузка / сохранение связей порталов ────────────────
+    // Формат portal_links.json:
+    // [{"portal_id":"p01","from":"aethoria_city","to":"dark_forest",
+    //   "spawn_x":10,"spawn_y":20,"label":"→ Лес","bidirectional":false}, ...]
+    bool loadPortalLinks(const std::string& path) {
+        std::ifstream f(path);
+        if (!f.is_open()) return false;
+        std::stringstream buf; buf << f.rdbuf();
+        auto root = SimpleJSON::Parser::parse(buf.str());
+        if (!root || !root->isArray()) return false;
+        portalLinks_.clear();
+        for (size_t i = 0; i < root->arrayVal.size(); i++) {
+            auto j = root->get(i);
+            if (!j) continue;
+            PortalLink pl;
+            if (auto v = j->get("portal_id"))    pl.portalId      = v->asString();
+            if (auto v = j->get("from"))          pl.fromScene     = v->asString();
+            if (auto v = j->get("to"))            pl.toScene       = v->asString();
+            if (auto v = j->get("spawn_x"))       pl.spawnX        = (float)v->asDouble();
+            if (auto v = j->get("spawn_y"))       pl.spawnY        = (float)v->asDouble();
+            if (auto v = j->get("label"))         pl.label         = v->asString();
+            if (auto v = j->get("bidirectional")) pl.bidirectional = v->asBool();
+            portalLinks_.push_back(pl);
+            // Если двунаправленный — создаём обратную связь автоматически
+            if (pl.bidirectional) {
+                PortalLink rev;
+                rev.portalId  = pl.portalId + "_back";
+                rev.fromScene = pl.toScene;
+                rev.toScene   = pl.fromScene;
+                rev.spawnX    = pl.spawnX;
+                rev.spawnY    = pl.spawnY;
+                rev.label     = "↩ " + pl.fromScene;
+                portalLinks_.push_back(rev);
+            }
+        }
+        _applyPortalLinksToScene(current_);
+        std::cout << "[SceneManager] Portal links: " << portalLinks_.size()
+                  << " из " << path << "\n";
+        return true;
+    }
+
+    bool savePortalLinks(const std::string& path) const {
+        std::ofstream f(path);
+        if (!f.is_open()) return false;
+        auto esc = [](const std::string& s) {
+            std::string o;
+            for (char c : s) {
+                if (c=='"') o += "\\\"";
+                else if (c=='\\') o += "\\\\";
+                else o += c;
+            }
+            return o;
+        };
+        f << "[\n";
+        bool firstWritten = false;
+        for (auto& pl : portalLinks_) {
+            // Пропускаем авто-сгенерированные обратные (_back)
+            if (pl.portalId.size() >= 5 &&
+                pl.portalId.compare(pl.portalId.size()-5, 5, "_back") == 0)
+                continue;
+            if (firstWritten) f << ",\n";
+            firstWritten = true;
+            f << "  {\n";
+            f << "    \"portal_id\": \""    << esc(pl.portalId)  << "\",\n";
+            f << "    \"from\": \""          << esc(pl.fromScene) << "\",\n";
+            f << "    \"to\": \""            << esc(pl.toScene)   << "\",\n";
+            f << "    \"spawn_x\": "         << pl.spawnX         << ",\n";
+            f << "    \"spawn_y\": "         << pl.spawnY         << ",\n";
+            f << "    \"label\": \""         << esc(pl.label)     << "\",\n";
+            f << "    \"bidirectional\": "   << (pl.bidirectional ? "true":"false") << "\n";
+            f << "  }";
+        }
+        f << "\n]\n";
+        std::cout << "[SceneManager] Portal links сохранены → " << path << "\n";
+        return true;
+    }
+
+    void setPortalLink(const PortalLink& pl) {
+        for (auto& ex : portalLinks_) {
+            if (ex.portalId == pl.portalId) { ex = pl; return; }
+        }
+        portalLinks_.push_back(pl);
+    }
+
+    std::vector<PortalLink> getLinksForScene(const std::string& sceneId) const {
+        std::vector<PortalLink> r;
+        for (auto& pl : portalLinks_)
+            if (pl.fromScene == sceneId) r.push_back(pl);
+        return r;
+    }
+
+    const PortalLink* getLinkByPortalId(const std::string& id) const {
+        for (auto& pl : portalLinks_)
+            if (pl.portalId == id) return &pl;
+        return nullptr;
+    }
+
+    const std::vector<PortalLink>& allPortalLinks() const { return portalLinks_; }
+    std::vector<PortalLink>&       allPortalLinks()       { return portalLinks_; }
 
     // Загрузить список сцен из game_config.json → "location.zones"
     void loadFromConfig(const std::string& configPath) {
@@ -295,6 +409,7 @@ public:
 
         currentId_      = id;
         current_.loaded = true;
+        _applyPortalLinksToScene(current_);
         std::cout << "[SceneManager] Загружена сцена: " << info.displayName
                   << "  (" << current_.width << "x" << current_.height
                   << "  fontains=" << current_.fountains.size() << ")\n";
@@ -434,6 +549,15 @@ private:
     std::string                      currentId_;
     std::string                      defaultSceneId_ = "aethoria_city";
     SceneData                        current_;
+    std::vector<PortalLink>          portalLinks_;
+
+    // Применяет связи порталов к загруженной сцене (props сущностей)
+    void _applyPortalLinksToScene(SceneData& sd) {
+        sd.portalLinks.clear();
+        for (auto& pl : portalLinks_)
+            if (pl.fromScene == sd.id)
+                sd.portalLinks.push_back(pl);
+    }
 
     void buildEmpty(SceneData& sd, const SceneInfo& info) {
         sd.id = info.id; sd.name = info.displayName;

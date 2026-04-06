@@ -222,7 +222,7 @@ private:
                    attackPower(15), defense(5), attackCooldown(0.5f), attackTimer(0) {}
     } player;
     
-    struct Enemy {
+struct Enemy {
         Vec2 position;
         Vec2 velocity;
         float hp, maxHp;
@@ -237,9 +237,59 @@ private:
                   hp(30), maxHp(30), level(1), damage(5),
                   speed(80.0f), attackCooldown(1.5f), attackTimer(0),
                   isBoss(false) {}
-    };
+    // Добавьте это внутрь класса AethoriaEngine, например, после объявления struct Enemy
+struct AnimationPlayer {
+    sf::Sprite sprite;
+    sf::Texture texture;
+    std::string currentAction = "idle";
+    float frameTime = 0.1f;
+    float currentFrame = 0.f;
+    int frameWidth = 32, frameHeight = 32;
+    int frameCount = 4;
+    bool facingRight = true;
+    
+    void setTexture(const sf::Texture& tex) {
+        texture = tex;
+        sprite.setTexture(texture);
+        sprite.setOrigin(frameWidth/2, frameHeight/2);
+    }
+    
+    void playAnimation(const std::string& action) {
+        if (currentAction == action) return;
+        currentAction = action;
+        currentFrame = 0.f;
+        frameCount = (action == "run") ? 4 : 4;
+    }
+    
+    void updateFacingFromVelocity(float velX) {
+        if (velX > 0.1f) facingRight = true;
+        else if (velX < -0.1f) facingRight = false;
+        sprite.setScale(facingRight ? 1.f : -1.f, 1.f);
+    }
+    
+    void update(float dt) {
+        currentFrame += dt / frameTime;
+        if (currentFrame >= frameCount) currentFrame -= frameCount;
+        int frameIndex = (int)currentFrame;
+        sprite.setTextureRect(sf::IntRect(frameIndex * frameWidth, 0, frameWidth, frameHeight));
+    }
+    
+    void setPosition(float x, float y) {
+        sprite.setPosition(x, y);
+    }
+    
+    void draw(sf::RenderWindow& win) {
+        win.draw(sprite);
+    }
+    
+    std::string getCurrentAction() const { return currentAction; }
+};
+
     
     std::vector<Enemy> enemies;
+    std::map<int, AnimationPlayer> enemyAnimations;
+    AnimationPlayer playerAnim;
+    bool wasMoving = false;
     std::map<int, AnimationPlayer> enemyAnimations; 
     Enemy* selectedTarget;
     
@@ -295,28 +345,75 @@ public:
         audioManager->loadSound("damage", "assets/sounds/damage.wav");
         audioManager->loadSound("levelup", "assets/sounds/levelup.wav");
         audioManager->loadBackgroundMusic("assets/music/ambient.ogg");
-    }
+        initAnimations();
+}    
+}
+
     
-    void spawnEnemies() {
-        std::mt19937 gen(std::random_device{}());
-        std::uniform_real_distribution<float> xDist(100, 800);
-        std::uniform_real_distribution<float> yDist(100, 600);
-        
-        for (int i = 0; i < 8; i++) {
-            Enemy enemy;
-            enemy.position = Vec2(xDist(gen), yDist(gen));
-            enemy.maxHp = 40 + i * 10;
-            enemy.hp = enemy.maxHp;
-            enemy.level = 1 + i / 2;
-            enemy.damage = 8 + i * 2;
-            enemy.name = "Forest Goblin Lv." + std::to_string(enemy.level);
-            enemies.push_back(enemy);
+    void initAnimations() {
+    // Создаём простую текстуру для теста (если нет реальных файлов)
+    sf::Image img;
+    img.create(128, 32, sf::Color::White);
+    
+    // Рисуем человечка для idle кадров
+    for (int i = 0; i < 4; i++) {
+        int x = i * 32;
+        // Тело
+        for (int py = 10; py < 28; py++) {
+            for (int px = x + 12; px < x + 20; px++) {
+                img.setPixel(px, py, sf::Color(100, 200, 100));
+            }
+        }
+        // Голова
+        for (int py = 4; py < 10; py++) {
+            for (int px = x + 12; px < x + 20; px++) {
+                img.setPixel(px, py, sf::Color(255, 220, 150));
+            }
         }
     }
     
-    bool isRunning() {
-        return window.isOpen();
+    sf::Texture tex;
+    tex.loadFromImage(img);
+    
+    // Настройка анимации игрока
+    playerAnim.setTexture(tex);
+    playerAnim.frameWidth = 32;
+    playerAnim.frameHeight = 32;
+    playerAnim.frameCount = 4;
+    playerAnim.frameTime = 0.15f;
+    playerAnim.playAnimation("idle");
+    
+    // Настройка анимаций врагов
+    for (size_t i = 0; i < enemies.size(); i++) {
+        AnimationPlayer anim;
+        anim.setTexture(tex);
+        anim.frameWidth = 32;
+        anim.frameHeight = 32;
+        anim.frameCount = 4;
+        anim.frameTime = 0.15f;
+        anim.playAnimation("idle");
+        enemyAnimations[i] = std::move(anim);
     }
+}
+    
+    void spawnEnemies() {
+    std::mt19937 gen(std::random_device{}());
+    std::uniform_real_distribution<float> xDist(100, 800);
+    std::uniform_real_distribution<float> yDist(100, 600);
+    
+    enemies.clear(); // <- ОЧИСТИТЕ перед спавном!
+    
+    for (int i = 0; i < 8; i++) {
+        Enemy enemy;
+        enemy.position = Vec2(xDist(gen), yDist(gen));
+        enemy.maxHp = 40 + i * 10;
+        enemy.hp = enemy.maxHp;
+        enemy.level = 1 + i / 2;
+        enemy.damage = 8 + i * 2;
+        enemy.name = "Forest Goblin Lv." + std::to_string(enemy.level);
+        enemies.push_back(enemy);
+    }
+}
     
     void handleEvents() {
         sf::Event event;
@@ -418,19 +515,43 @@ public:
     }
     
     void updatePlayerMovement() {
-        Vec2 moveDir(0, 0);
-        
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) moveDir.y -= 1;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) moveDir.y += 1;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) moveDir.x -= 1;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) moveDir.x += 1;
-        
-        if (moveDir.length() > 0) {
-            moveDir = moveDir.normalized();
-            player.velocity = moveDir * player.speed;
-        } else {
-            player.velocity = Vec2(0, 0);
-        }
+    Vec2 moveDir(0, 0);
+    float rawDirX = 0; // Сохраняем сырое направление для facing
+    
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) moveDir.y -= 1;
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) moveDir.y += 1;
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) { moveDir.x -= 1; rawDirX = -1; }
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) { moveDir.x += 1; rawDirX = 1; }
+    
+    bool isMoving = (moveDir.length() > 0);
+    
+    if (isMoving) {
+        moveDir = moveDir.normalized();
+        player.velocity = moveDir * player.speed;
+        player.position = player.position + player.velocity * deltaTime;
+    } else {
+        player.velocity = Vec2(0, 0);
+    }
+    
+    // Обновляем facing персонажа
+    playerAnim.updateFacingFromVelocity(rawDirX);
+    
+    // Переключаем анимацию idle/run
+    if (isMoving) {
+        if (playerAnim.getCurrentAction() != "run")
+            playerAnim.playAnimation("run");
+    } else {
+        if (playerAnim.getCurrentAction() != "idle")
+            playerAnim.playAnimation("idle");
+    }
+    
+    playerAnim.update(deltaTime);
+    playerAnim.setPosition(player.position.x, player.position.y);
+    
+    // Обновляем камеру
+    gameView.setCenter(player.position.x, player.position.y);
+    window.setView(gameView);
+}
         
         player.position = player.position + player.velocity * deltaTime;
         
@@ -439,37 +560,40 @@ public:
         window.setView(gameView);
     }
     
-   void updateEnemies() {
-    for (size_t i = 0; i < enemies.size(); i++) {
+    void updateEnemies() {
+        for (size_t i = 0; i < enemies.size(); i++) {
         auto& enemy = enemies[i];
         
-        // 1. Движение к игроку
         Vec2 dirToPlayer = (player.position - enemy.position);
         float distToPlayer = dirToPlayer.length();
         
-        if (distToPlayer > 5.0f) { // Двигаемся, только если игрок не вплотную
-            enemy.velocity = dirToPlayer.normalized() * enemy.speed;
-            enemy.position = enemy.position + enemy.velocity * deltaTime;
+        // Движение к игроку
+        if (distToPlayer > 30.0f) {
+            Vec2 move = dirToPlayer.normalized() * enemy.speed * deltaTime;
+            enemy.position = enemy.position + move;
+            
+            // ИСПРАВЛЕНИЕ: обновляем facing через velocity
+            if (enemyAnimations.count(i))
+                enemyAnimations[i].updateFacingFromVelocity(move.x);
         } else {
-            enemy.velocity = Vec2(0, 0);
+            // Стоим, но смотрим на игрока
+            if (enemyAnimations.count(i))
+                enemyAnimations[i].updateFacingFromVelocity(player.position.x - enemy.position.x);
         }
         
-        // 2. ПОВОРОТ (Зеркалирование спрайта)
-        // Если игрок слева от моба (разница по X отрицательная)
-        if (player.position.x < enemy.position.x - 2.0f) {
-            // Разворачиваем влево
-            enemyAnimations[i].getSprite().setScale(-1.0f, 1.0f);
-        } 
-        else if (player.position.x > enemy.position.x + 2.0f) {
-            // Смотрим вправо
-            enemyAnimations[i].getSprite().setScale(1.0f, 1.0f);
+        // Переключение анимации
+        bool isMoving = (distToPlayer > 35.0f);
+        if (enemyAnimations.count(i)) {
+            if (isMoving && enemyAnimations[i].getCurrentAction() != "run")
+                enemyAnimations[i].playAnimation("run");
+            else if (!isMoving && enemyAnimations[i].getCurrentAction() != "idle")
+                enemyAnimations[i].playAnimation("idle");
+            
+            enemyAnimations[i].update(deltaTime);
+            enemyAnimations[i].setPosition(enemy.position.x, enemy.position.y);
         }
-
-        // 3. ОБНОВЛЕНИЕ АНИМАЦИИ И ПОЗИЦИИ
-        enemyAnimations[i].update(deltaTime);
-        enemyAnimations[i].setPosition(enemy.position.x, enemy.position.y);
-
-        // 4. ЛОГИКА АТАКИ
+        
+        // Атака
         if (distToPlayer < 30.0f && enemy.attackTimer <= 0) {
             player.hp -= enemy.damage;
             enemy.attackTimer = enemy.attackCooldown;
@@ -480,7 +604,7 @@ public:
     }
 }
 
-      void render() {
+    void render() {
         window.clear(sf::Color(20, 15, 35));
         
         // Draw world
@@ -501,7 +625,7 @@ public:
         window.display();
     }
     
-   void drawWorld() {
+    void drawWorld() {
         // Draw grid
         sf::Color gridColor(40, 35, 60);
         
@@ -536,7 +660,7 @@ public:
     }
     
     void drawEnemies() {
-    for (size_t i = 0; i < enemies.size(); i++) {
+       for (size_t i = 0; i < enemies.size(); i++) {
         auto& enemy = enemies[i];
         
         // 1. Рисуем анимацию вместо кружочка

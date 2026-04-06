@@ -297,6 +297,31 @@ except ImportError:
     MMO_TABS = False
 
 
+def _load_custom_tiles(project_root: Path):
+    """Загружает пользовательские тайлы из assets/custom_tiles.json в TILES и TILE_GROUPS."""
+    ct_path = project_root / "assets" / "custom_tiles.json"
+    if not ct_path.exists(): return
+    try:
+        items = json.loads(ct_path.read_text(encoding="utf-8"))
+        for t in items:
+            tid = t.get("id","")
+            if not tid or tid in TILES: continue
+            TILES[tid] = {
+                "name":     t.get("name", tid),
+                "color":    t.get("color", "#888888"),
+                "walkable": t.get("walkable", True),
+                "sfml":     t.get("sfml", "128,128,128"),
+                "texture":  t.get("texture",""),
+            }
+            grp = "🎨 " + t.get("group","Пользовательские")
+            TILE_GROUPS.setdefault(grp, [])
+            if tid not in TILE_GROUPS[grp]:
+                TILE_GROUPS[grp].append(tid)
+        print(f"[OK] custom_tiles.json: загружено {len(items)} тайлов")
+    except Exception as ex:
+        print(f"[WARN] custom_tiles.json: {ex}")
+
+
 # ══════════════════════════════════════════════════════════════
 # ГЕНЕРАЦИЯ КАРТЫ
 # ══════════════════════════════════════════════════════════════
@@ -1024,19 +1049,69 @@ class MapTab:
         canvas_t.create_window((0,0), window=inner, anchor="nw")
         inner.bind("<Configure>", lambda e: canvas_t.configure(scrollregion=canvas_t.bbox("all")))
         self._tile_buttons = {}
+        self._tile_group_expanded = {}
+
+        def _scroll_inner(e):
+            canvas_t.yview_scroll(-1*(e.delta//120), "units")
+
         for grp, tile_list in TILE_GROUPS.items():
-            lbl(inner,grp,C["muted"],("Segoe UI",8),C["panel"]).pack(fill="x",padx=4,pady=(4,1))
+            # По умолчанию первая группа открыта, остальные закрыты
+            self._tile_group_expanded[grp] = (list(TILE_GROUPS.keys()).index(grp) == 0)
+
+            # Заголовок группы — кликабельный
+            grp_fr = tk.Frame(inner, bg=C["panel3"], cursor="hand2")
+            grp_fr.pack(fill="x", padx=2, pady=(4,0))
+
+            arrow_var = tk.StringVar(
+                value=("▼ " if self._tile_group_expanded[grp] else "▶ ") + grp
+            )
+            arrow_lbl = tk.Label(
+                grp_fr, textvariable=arrow_var,
+                bg=C["panel3"], fg=C["gold2"],
+                font=("Segoe UI", 8, "bold"),
+                anchor="w", padx=6, pady=4, cursor="hand2"
+            )
+            arrow_lbl.pack(fill="x")
+
+            # Контейнер тайлов группы
+            tile_fr = tk.Frame(inner, bg=C["panel"])
+            if self._tile_group_expanded[grp]:
+                tile_fr.pack(fill="x", padx=4)
+
+            def _make_toggle(g=grp, av=arrow_var, tf=tile_fr):
+                def _toggle(event=None):
+                    self._tile_group_expanded[g] = not self._tile_group_expanded[g]
+                    if self._tile_group_expanded[g]:
+                        tf.pack(fill="x", padx=4)
+                        av.set("▼ " + g)
+                    else:
+                        tf.pack_forget()
+                        av.set("▶ " + g)
+                    canvas_t.update_idletasks()
+                    canvas_t.configure(scrollregion=canvas_t.bbox("all"))
+                return _toggle
+
+            tog = _make_toggle()
+            grp_fr.bind("<Button-1>", tog)
+            arrow_lbl.bind("<Button-1>", tog)
+            grp_fr.bind("<MouseWheel>", _scroll_inner)
+            arrow_lbl.bind("<MouseWheel>", _scroll_inner)
+
+            # Тайлы внутри группы
             for tk_name in tile_list:
                 info = TILES[tk_name]
-                fr = tk.Frame(inner, bg=C["panel"]); fr.pack(fill="x", padx=4, pady=1)
+                fr = tk.Frame(tile_fr, bg=C["panel"]); fr.pack(fill="x", padx=2, pady=1)
                 dot = tk.Canvas(fr, width=14, height=14, bg=C["panel"], highlightthickness=0)
                 dot.pack(side="left", padx=(2,4))
                 dot.create_rectangle(2,2,12,12, fill=info["color"], outline="")
                 b = btn(fr, info["name"], lambda t=tk_name: self._select_tile(t),
                        C["panel2"], C["text"], ("Segoe UI",8), padx=4, pady=2)
                 b.pack(side="left", fill="x", expand=True)
+                fr.bind("<MouseWheel>", _scroll_inner)
+                b.bind("<MouseWheel>", _scroll_inner)
                 self._tile_buttons[tk_name] = (fr, b, dot)
-        inner.bind("<MouseWheel>", lambda e: canvas_t.yview_scroll(-1*(e.delta//120),"units"))
+
+        inner.bind("<MouseWheel>", _scroll_inner)
 
     def _build_canvas(self, p):
         # Статус
@@ -1162,8 +1237,22 @@ class MapTab:
             b.config(bg=C["accent"] if t==self.tool else C["panel3"])
 
     def _select_tile(self, t):
+        # Сбрасываем подсветку предыдущего выбора
+        if hasattr(self, 'selected_tile') and self.selected_tile in self._tile_buttons:
+            _, oldb, _ = self._tile_buttons[self.selected_tile]
+            oldb.config(bg=C["panel2"])
         self.selected_tile = t
-        self._update_status()
+        # Подсвечиваем новый выбор
+        if t in self._tile_buttons:
+            _, newb, _ = self._tile_buttons[t]
+            newb.config(bg=C["accent"])
+            # Авто-раскрываем группу если закрыта
+            for grp, tile_list in TILE_GROUPS.items():
+                if t in tile_list and not self._tile_group_expanded.get(grp, True):
+                    # найдём toggle и раскроем
+                    self._tile_group_expanded[grp] = True
+        self._set_tool("draw")
+        self._update_status(f"🖌 {TILES.get(t,{}).get('name', t)}")
 
     def _start_place(self, kind):
         self._set_tool("entity")
@@ -1553,10 +1642,21 @@ class MapTab:
 
     # ── File ops ──────────────────────────────────────────────────
     def _new_map(self):
-        if not messagebox.askyesno("Новая карта","Создать новую карту?"): return
-        self.mapdata.tiles=generate_default_map()
+        if not messagebox.askyesno("Новая карта", "Создать новую карту? Несохранённые изменения будут потеряны."): return
+        name = simpledialog.askstring(
+            "Имя сцены",
+            "Введите имя новой сцены:",
+            initialvalue="Aethoria City",
+            parent=self.canvas.winfo_toplevel() if hasattr(self, 'canvas') else None
+        ) or "Aethoria City"
+        self.mapdata.tiles = generate_default_map()
+        self.mapdata.name  = name
         self.mapdata.registry.from_list(generate_default_entities())
-        self.modified=False; self._draw_full_map(); self._update_minimap(); self._update_stats()
+        # Сбрасываем filepath чтобы при первом Ctrl+S спросить имя файла
+        # (но только если старый файл называлось иначе)
+        self.modified = False
+        self._draw_full_map(); self._update_minimap(); self._update_stats()
+        self._update_status(f"🗺 Новая сцена: {name}")
 
     def _save(self):
         # Если путь не задан — пробуем project_root/assets/map.json, потом диалог
@@ -1570,14 +1670,27 @@ class MapTab:
                                                   filetypes=[("JSON", "*.json")])
                 if not p: return
                 self.mapdata.filepath = p
+        # Если имя карты по умолчанию — уточняем у пользователя
+        if self.mapdata.name in ("World", "Aethoria World"):
+            name = simpledialog.askstring(
+                "Имя карты",
+                "Введите имя сцены (напр. Aethoria City):",
+                initialvalue="Aethoria City",
+                parent=self.canvas.winfo_toplevel()
+            )
+            if name:
+                self.mapdata.name = name
         try:
             data = self.mapdata.to_dict()
             Path(self.mapdata.filepath).write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             self.modified = False
-            # Синхронизируем в scenes/ чтобы движок видел актуальные данные
             self._sync_to_scenes(data)
+            # Мигаем "Сохранено" в title bar
+            if hasattr(self, '_autosave_label'):
+                self._autosave_label.config(text="✅ Сохранено")
+                self.canvas.after(2500, lambda: self._autosave_label.config(text=""))
         except Exception as ex:
             messagebox.showerror("Ошибка сохранения", str(ex))
 
@@ -1591,21 +1704,32 @@ class MapTab:
         try:
             scenes_dir = self.project_root / "assets" / "scenes"
             scenes_dir.mkdir(parents=True, exist_ok=True)
-            # Определяем scene_id из metadata или имени файла карты
+
+            # Определяем scene_id: приоритет metadata → имя карты → имя файла
             scene_id = data.get("metadata", {}).get("scene_id", "")
+            if not scene_id:
+                map_name = data.get("name", "")
+                if map_name and map_name not in ("World", "Aethoria World", ""):
+                    # "Aethoria City" → "aethoria_city"
+                    scene_id = map_name.lower().replace(" ", "_")
             if not scene_id and self.mapdata.filepath:
                 stem = Path(self.mapdata.filepath).stem.lower().replace(" ", "_")
-                scene_id = stem
+                # "map" — слишком общее, подставляем более конкретное
+                scene_id = stem if stem != "map" else "aethoria_city"
             if not scene_id:
                 scene_id = "aethoria_city"
+
+            # Записываем scene_id обратно в metadata чтобы не терялся
+            data.setdefault("metadata", {})["scene_id"] = scene_id
+
             scene_file = scenes_dir / f"{scene_id}.json"
             scene_file.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             n = len(self.mapdata.registry.all())
+            fp = Path(self.mapdata.filepath).name if self.mapdata.filepath else "—"
             self._update_status(
-                f"💾 Сохранено → {Path(self.mapdata.filepath).name}"
-                f"  +  scenes/{scene_id}.json  ({n} сущностей)"
+                f"💾 {fp}  →  scenes/{scene_id}.json  ({n} объектов)"
             )
         except Exception as ex:
             self._update_status(f"💾 Сохранено (sync failed: {ex})")
@@ -1702,6 +1826,9 @@ class AssetPipelineTab:
         tk.Label(hdr, text="MP4 / GIF / PNG → Sprite Sheet + JSON → Движок AETHORIA",
                 bg=C["panel"], fg=C["muted"], font=("Segoe UI",9), padx=8).pack(side="left")
 
+        # ── Статус ключевых файлов ─────────────────────────────────
+        self._build_asset_status(hdr)
+
         # Основной split
         main = tk.Frame(self.frame, bg=C["bg"])
         main.pack(fill="both", expand=True, padx=12, pady=8)
@@ -1716,6 +1843,32 @@ class AssetPipelineTab:
         right = tk.Frame(main, bg=C["bg"])
         right.pack(side="left", fill="both", expand=True)
         self._build_right_panel(right)
+
+    def _build_asset_status(self, parent):
+        """Индикаторы существующих ключевых файлов проекта."""
+        sf = tk.Frame(parent, bg=C["panel"])
+        sf.pack(side="right", padx=12)
+        check_files = [
+            ("animations.json",  "assets/animations.json"),
+            ("prefabs.json",     "assets/prefabs.json"),
+            ("map.json",         "assets/map.json"),
+            ("game_config.json", "assets/game_config.json"),
+            ("quests.json",      "assets/quests.json"),
+        ]
+        for label, rel in check_files:
+            exists = (self.project_root / rel).exists()
+            color = C["green"] if exists else C["danger"]
+            icon  = "✅" if exists else "❌"
+            tk.Label(sf, text=f"{icon} {label}",
+                     bg=C["panel"], fg=color,
+                     font=("Consolas", 7)).pack(side="left", padx=4)
+        # Кнопка обновить
+        def _refresh_status():
+            for w in sf.winfo_children(): w.destroy()
+            self._build_asset_status(parent)   # пересоздаём
+        tk.Button(sf, text="🔄", bg=C["panel3"], fg=C["muted"],
+                  font=("Segoe UI",8), bd=0, cursor="hand2",
+                  command=_refresh_status).pack(side="left", padx=2)
 
     def _build_import_panel(self, p):
         # Зона перетаскивания
@@ -5003,6 +5156,615 @@ class PrefabSystemTab:
             ci = PREFAB_CATEGORIES[cid]
             b.config(text=f"{ci['name']}  ({len(self._prefabs.get(cid,[]))})")
 
+
+# ══════════════════════════════════════════════════════════════
+# ВКЛАДКА: НАРЕЗКА ТАЙЛСЕТОВ
+# ══════════════════════════════════════════════════════════════
+class TilesetTab:
+    """
+    Импортирует любую картинку (PNG/JPG) и нарезает её на тайлы.
+    Каждый тайл сохраняется в assets/textures/tiles/<name>_<row>_<col>.png
+    и регистрируется в assets/custom_tiles.json для использования в редакторе карты.
+    """
+    CUSTOM_TILES_FILE = "assets/custom_tiles.json"
+
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = project_root
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🧱 Тайлсеты")
+        self._source_img   = None   # PIL Image
+        self._source_path  = ""
+        self._preview_refs = []     # ImageTk — держим ref
+        self._tile_w   = tk.IntVar(value=32)
+        self._tile_h   = tk.IntVar(value=32)
+        self._set_name = tk.StringVar(value="custom")
+        self._status   = tk.StringVar(value="Выберите изображение")
+        self._tiles_out: list[dict] = []   # уже нарезанные тайлы
+        self._build_ui()
+
+    # ── UI ────────────────────────────────────────────────────
+    def _build_ui(self):
+        hdr = tk.Frame(self.frame, bg=C["panel"], pady=6)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="🧱  НАРЕЗКА ТАЙЛСЕТОВ",
+                 bg=C["panel"], fg=C["gold"], font=("Segoe UI",13,"bold"), padx=16).pack(side="left")
+        tk.Label(hdr, textvariable=self._status,
+                 bg=C["panel"], fg=C["green"], font=("Segoe UI",9), padx=16).pack(side="right")
+
+        body = tk.Frame(self.frame, bg=C["bg"])
+        body.pack(fill="both", expand=True)
+
+        # ── Левая панель: настройки ───────────────────────────
+        left = tk.Frame(body, bg=C["panel"], width=280)
+        left.pack(side="left", fill="y"); left.pack_propagate(False)
+
+        tk.Label(left, text="📂 ИСТОЧНИК", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=8).pack(fill="x", padx=12)
+
+        btn(left, "📂 Выбрать изображение", self._browse, C["accent"],
+            padx=10, pady=5).pack(fill="x", padx=12, pady=4)
+
+        self._src_lbl = tk.Label(left, text="Не выбрано", bg=C["panel"],
+                                  fg=C["muted"], font=("Segoe UI",8),
+                                  wraplength=240, anchor="w")
+        self._src_lbl.pack(fill="x", padx=12)
+
+        sep(left).pack(fill="x", padx=12, pady=8)
+        tk.Label(left, text="⚙ ПАРАМЕТРЫ НАРЕЗКИ", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold")).pack(fill="x", padx=12, pady=(0,6))
+
+        for lbl_text, var in [("Ширина тайла (px):", self._tile_w),
+                                ("Высота тайла (px):", self._tile_h)]:
+            fr = tk.Frame(left, bg=C["panel"]); fr.pack(fill="x", padx=12, pady=3)
+            tk.Label(fr, text=lbl_text, bg=C["panel"], fg=C["muted"],
+                     font=("Segoe UI",9), width=20, anchor="w").pack(side="left")
+            tk.Spinbox(fr, textvariable=var, from_=8, to=256, increment=8, width=5,
+                       bg=C["input_bg"], fg=C["text"], relief="flat",
+                       buttonbackground=C["panel3"], font=("Segoe UI",9),
+                       command=self._on_params_change).pack(side="left")
+
+        fr2 = tk.Frame(left, bg=C["panel"]); fr2.pack(fill="x", padx=12, pady=3)
+        tk.Label(fr2, text="Имя набора:", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI",9), width=20, anchor="w").pack(side="left")
+        tk.Entry(fr2, textvariable=self._set_name, bg=C["input_bg"], fg=C["text"],
+                 relief="flat", font=("Segoe UI",9), width=10).pack(side="left")
+
+        sep(left).pack(fill="x", padx=12, pady=8)
+
+        btn(left, "✂ Нарезать!", self._slice, C["green"], "black",
+            padx=10, pady=6).pack(fill="x", padx=12, pady=4)
+        btn(left, "💾 Сохранить тайлы", self._save_tiles, C["accent"],
+            padx=10, pady=5).pack(fill="x", padx=12, pady=2)
+
+        sep(left).pack(fill="x", padx=12, pady=8)
+        tk.Label(left, text="📋 НАРЕЗАНО", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",9,"bold")).pack(fill="x", padx=12)
+        self._count_lbl = tk.Label(left, text="0 тайлов", bg=C["panel"],
+                                    fg=C["text"], font=("Segoe UI",12,"bold"), pady=4)
+        self._count_lbl.pack(fill="x", padx=16)
+
+        sep(left).pack(fill="x", padx=12, pady=8)
+        tk.Label(left, text="💡 СОВЕТ", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI",8,"bold")).pack(fill="x", padx=12)
+        tk.Label(left,
+                 text="Нарезанные тайлы автоматически\n"
+                      "добавляются в редактор карты\n"
+                      "через custom_tiles.json",
+                 bg=C["panel"], fg=C["muted"], font=("Segoe UI",7),
+                 justify="left").pack(fill="x", padx=14, pady=4)
+
+        # ── Правая панель: превью ─────────────────────────────
+        right = tk.Frame(body, bg=C["bg"])
+        right.pack(side="left", fill="both", expand=True)
+
+        top_r = tk.Frame(right, bg=C["bg"])
+        top_r.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Исходное изображение + сетка
+        tk.Label(top_r, text="Источник (с сеткой нарезки):", bg=C["bg"],
+                 fg=C["gold"], font=("Segoe UI",9,"bold")).pack(anchor="w")
+        src_frame = tk.Frame(top_r, bg=C["canvas"], bd=1, relief="sunken")
+        src_frame.pack(fill="both", expand=True, pady=4)
+        self._src_canvas = tk.Canvas(src_frame, bg=C["canvas"], highlightthickness=0)
+        src_vsb = ttk.Scrollbar(src_frame, orient="vertical", command=self._src_canvas.yview,
+                                style="Dark.Vertical.TScrollbar")
+        src_hsb = ttk.Scrollbar(src_frame, orient="horizontal", command=self._src_canvas.xview,
+                                style="Dark.Horizontal.TScrollbar")
+        self._src_canvas.configure(yscrollcommand=src_vsb.set, xscrollcommand=src_hsb.set)
+        src_hsb.pack(side="bottom", fill="x"); src_vsb.pack(side="right", fill="y")
+        self._src_canvas.pack(side="left", fill="both", expand=True)
+        self._src_canvas.bind("<MouseWheel>",
+            lambda e: self._src_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        # Нарезанные тайлы
+        tk.Label(top_r, text="Нарезанные тайлы:", bg=C["bg"],
+                 fg=C["gold"], font=("Segoe UI",9,"bold")).pack(anchor="w", pady=(8,2))
+        tiles_frame = tk.Frame(top_r, bg=C["canvas"], bd=1, relief="sunken")
+        tiles_frame.pack(fill="both", expand=True, pady=4)
+        self._tiles_canvas = tk.Canvas(tiles_frame, bg=C["canvas"], highlightthickness=0)
+        t_vsb = ttk.Scrollbar(tiles_frame, orient="vertical", command=self._tiles_canvas.yview,
+                               style="Dark.Vertical.TScrollbar")
+        t_hsb = ttk.Scrollbar(tiles_frame, orient="horizontal", command=self._tiles_canvas.xview,
+                               style="Dark.Horizontal.TScrollbar")
+        self._tiles_canvas.configure(yscrollcommand=t_vsb.set, xscrollcommand=t_hsb.set)
+        t_hsb.pack(side="bottom", fill="x"); t_vsb.pack(side="right", fill="y")
+        self._tiles_canvas.pack(side="left", fill="both", expand=True)
+        self._tiles_canvas.bind("<MouseWheel>",
+            lambda e: self._tiles_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+    # ── Логика ────────────────────────────────────────────────
+    def _browse(self):
+        path = filedialog.askopenfilename(
+            title="Выберите тайлсет",
+            filetypes=[("Изображения","*.png *.jpg *.jpeg *.bmp *.webp"),("Все","*.*")],
+            parent=self.frame.winfo_toplevel())
+        if not path: return
+        if not PILLOW:
+            messagebox.showerror("Ошибка","Pillow не установлен: pip install Pillow",
+                                 parent=self.frame.winfo_toplevel())
+            return
+        try:
+            self._source_img  = Image.open(path).convert("RGBA")
+            self._source_path = path
+            name = Path(path).stem.lower().replace(" ","_")
+            self._set_name.set(name)
+            self._src_lbl.config(
+                text=f"{Path(path).name}  ({self._source_img.width}×{self._source_img.height})")
+            self._status.set(f"Загружено: {Path(path).name}")
+            self._draw_source_preview()
+        except Exception as ex:
+            messagebox.showerror("Ошибка загрузки", str(ex), parent=self.frame.winfo_toplevel())
+
+    def _on_params_change(self):
+        if self._source_img:
+            self._draw_source_preview()
+
+    def _draw_source_preview(self):
+        if not PILLOW or not self._source_img: return
+        img = self._source_img.copy()
+        # Масштаб для превью (не более 800 px по ширине)
+        scale = min(1.0, 800 / max(img.width, 1))
+        pw = int(img.width * scale); ph = int(img.height * scale)
+        preview = img.resize((pw, ph), Image.NEAREST)
+
+        # Рисуем сетку нарезки
+        from PIL import ImageDraw as ID
+        draw = ID.Draw(preview)
+        tw = max(1, int(self._tile_w.get() * scale))
+        th = max(1, int(self._tile_h.get() * scale))
+        grid_color = (100, 200, 255, 180)
+        for x in range(0, pw, tw):
+            draw.line([(x,0),(x,ph)], fill=grid_color, width=1)
+        for y in range(0, ph, th):
+            draw.line([(0,y),(pw,y)], fill=grid_color, width=1)
+
+        self._preview_refs = []
+        photo = ImageTk.PhotoImage(preview)
+        self._preview_refs.append(photo)
+        self._src_canvas.delete("all")
+        self._src_canvas.config(scrollregion=(0,0,pw,ph))
+        self._src_canvas.create_image(0, 0, anchor="nw", image=photo)
+
+    def _slice(self):
+        if not PILLOW:
+            messagebox.showerror("Ошибка","Pillow не установлен.",
+                                 parent=self.frame.winfo_toplevel()); return
+        if not self._source_img:
+            messagebox.showwarning("Нет изображения","Сначала выберите файл.",
+                                   parent=self.frame.winfo_toplevel()); return
+        tw = self._tile_w.get(); th = self._tile_h.get()
+        img = self._source_img
+        cols = img.width  // tw
+        rows = img.height // th
+        if cols == 0 or rows == 0:
+            messagebox.showerror("Ошибка",
+                f"Изображение ({img.width}×{img.height}) меньше тайла ({tw}×{th}).",
+                parent=self.frame.winfo_toplevel()); return
+        self._tiles_out = []
+        preview_size = 48
+        self._tiles_canvas.delete("all")
+        self._preview_refs = [r for r in self._preview_refs if True]  # keep prev source refs
+
+        name = self._set_name.get().strip() or "custom"
+        px = 4
+        for row in range(rows):
+            for col in range(cols):
+                tile_img = img.crop((col*tw, row*th, (col+1)*tw, (row+1)*th))
+                thumb = tile_img.resize((preview_size, preview_size), Image.NEAREST)
+                photo = ImageTk.PhotoImage(thumb)
+                self._preview_refs.append(photo)
+                x0 = px; y0 = (row * cols + col) // 8 * (preview_size+6) + 4
+                gx  = (row * cols + col) % 8
+                x0  = gx * (preview_size + 4) + 4
+                y0  = (row * cols + col) // 8 * (preview_size + 6) + 4
+                self._tiles_canvas.create_image(x0, y0, anchor="nw", image=photo)
+                self._tiles_canvas.create_rectangle(
+                    x0-1, y0-1, x0+preview_size, y0+preview_size,
+                    outline=C["border"], width=1)
+                tile_id = f"{name}_{row:02d}_{col:02d}"
+                self._tiles_canvas.create_text(
+                    x0 + preview_size//2, y0 + preview_size + 1,
+                    text=f"{row},{col}", fill=C["muted"], font=("Segoe UI",6))
+                self._tiles_out.append({
+                    "id":    tile_id,
+                    "name":  f"{name} [{row},{col}]",
+                    "row":   row, "col": col,
+                    "img":   tile_img,
+                })
+        total_w = min(8, cols) * (preview_size + 4) + 8
+        total_h = ((rows * cols) // 8 + 1) * (preview_size + 6) + 8
+        self._tiles_canvas.config(scrollregion=(0, 0, total_w, total_h))
+        self._count_lbl.config(text=f"{len(self._tiles_out)} тайлов")
+        self._status.set(f"Нарезано: {rows}×{cols} = {len(self._tiles_out)} тайлов")
+
+    def _save_tiles(self):
+        if not self._tiles_out:
+            messagebox.showwarning("Нет тайлов","Сначала нарежьте изображение.",
+                                   parent=self.frame.winfo_toplevel()); return
+        name = self._set_name.get().strip() or "custom"
+        out_dir = self.project_root / "assets" / "textures" / "tiles" / name
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        saved = []
+        for t in self._tiles_out:
+            fname = out_dir / f"{t['id']}.png"
+            t["img"].save(str(fname), "PNG")
+            rel = str(Path("assets/textures/tiles") / name / f"{t['id']}.png").replace("\\","/")
+            # Вычисляем средний цвет для отображения в редакторе карты
+            arr = list(t["img"].convert("RGB").getdata())
+            r = sum(p[0] for p in arr) // len(arr)
+            g = sum(p[1] for p in arr) // len(arr)
+            b = sum(p[2] for p in arr) // len(arr)
+            color = f"#{r:02x}{g:02x}{b:02x}"
+            saved.append({
+                "id":      t["id"],
+                "name":    t["name"],
+                "texture": rel,
+                "color":   color,
+                "walkable": True,
+                "group":   name,
+            })
+
+        # Обновляем custom_tiles.json
+        ct_path = self.project_root / self.CUSTOM_TILES_FILE
+        existing = []
+        if ct_path.exists():
+            try: existing = json.loads(ct_path.read_text(encoding="utf-8"))
+            except: pass
+        # Убираем старые тайлы с тем же group
+        existing = [t for t in existing if t.get("group") != name]
+        existing.extend(saved)
+        ct_path.parent.mkdir(parents=True, exist_ok=True)
+        ct_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        self._status.set(f"✅ Сохранено {len(saved)} тайлов → {out_dir.name}/  +  custom_tiles.json")
+        messagebox.showinfo("Готово",
+            f"Сохранено {len(saved)} тайлов в:\n{out_dir}\n\n"
+            "Тайлы добавлены в custom_tiles.json.\n"
+            "Перезапустите редактор чтобы увидеть их в палитре карты.",
+            parent=self.frame.winfo_toplevel())
+
+
+# ══════════════════════════════════════════════════════════════
+# ВКЛАДКА: СВЯЗИ ПОРТАЛОВ (визуальный редактор)
+# ══════════════════════════════════════════════════════════════
+class PortalLinksTab:
+    """
+    Визуально отображает граф сцен и порталы между ними.
+    Позволяет добавлять / редактировать связи портал → сцена → spawn.
+    Сохраняет в assets/portal_links.json.
+    """
+    LINKS_FILE = "assets/portal_links.json"
+    SCENES_CFG = "assets/game_config.json"
+
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = project_root
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🌀 Порталы")
+        self._links: list[dict] = []
+        self._scenes: list[str] = []
+        self._sel_idx: int = -1
+        self._node_pos: dict = {}   # scene_id → (x,y) на канвасе
+        self._drag_node = None
+        self._drag_ox = self._drag_oy = 0
+        self._vars: dict = {}
+        self._build_ui()
+        self._load()
+
+    # ── UI ────────────────────────────────────────────────────
+    def _build_ui(self):
+        hdr = tk.Frame(self.frame, bg=C["panel"], pady=6)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="🌀  СВЯЗИ ПОРТАЛОВ — граф переходов между сценами",
+                 bg=C["panel"], fg=C["gold"], font=("Segoe UI",13,"bold"), padx=16).pack(side="left")
+        btn(hdr, "💾 Сохранить", self._save, C["accent"], padx=14, pady=4).pack(side="right", padx=8)
+        btn(hdr, "+ Новая связь", self._new_link, C["green"], "black", padx=10, pady=4).pack(side="right", padx=4)
+        btn(hdr, "🔄 Обновить граф", self._refresh_graph, C["panel3"], padx=10, pady=4).pack(side="right", padx=4)
+
+        pane = tk.PanedWindow(self.frame, orient="horizontal", bg=C["bg"], sashwidth=4)
+        pane.pack(fill="both", expand=True)
+
+        # ── Граф (канвас) ─────────────────────────────────────
+        graph_fr = tk.Frame(pane, bg=C["canvas"])
+        pane.add(graph_fr, minsize=500)
+        tk.Label(graph_fr, text="Сцены и связи порталов (перетаскивай узлы)",
+                 bg=C["canvas"], fg=C["muted"], font=("Segoe UI",8)).pack(anchor="w", padx=8, pady=2)
+        self._graph = tk.Canvas(graph_fr, bg=C["canvas"], highlightthickness=0)
+        self._graph.pack(fill="both", expand=True, padx=4, pady=4)
+        self._graph.bind("<ButtonPress-1>",   self._graph_click)
+        self._graph.bind("<B1-Motion>",       self._graph_drag)
+        self._graph.bind("<ButtonRelease-1>", self._graph_release)
+
+        # ── Правая панель: список + редактор ──────────────────
+        right = tk.Frame(pane, bg=C["panel"], width=360)
+        pane.add(right, minsize=300)
+        right.pack_propagate(False)
+
+        tk.Label(right, text="Список связей", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=6).pack(fill="x", padx=8)
+
+        lf = tk.Frame(right, bg=C["panel"]); lf.pack(fill="x", padx=8)
+        sb = tk.Scrollbar(lf); sb.pack(side="right", fill="y")
+        self._listbox = tk.Listbox(lf, bg=C["panel2"], fg=C["text"],
+                                    selectbackground=C["accent"], relief="flat",
+                                    font=("Segoe UI",9), height=10,
+                                    yscrollcommand=sb.set)
+        self._listbox.pack(fill="x"); sb.config(command=self._listbox.yview)
+        self._listbox.bind("<<ListboxSelect>>", self._on_select)
+
+        bf = tk.Frame(right, bg=C["panel"]); bf.pack(fill="x", padx=8, pady=4)
+        btn(bf, "🗑 Удалить", self._delete_link, C["danger"], padx=8, pady=3).pack(side="right")
+
+        sep(right).pack(fill="x", padx=8, pady=6)
+
+        tk.Label(right, text="Редактор связи", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold")).pack(fill="x", padx=8)
+
+        self._ed = tk.Frame(right, bg=C["panel"])
+        self._ed.pack(fill="both", expand=True, padx=8, pady=4)
+        self._build_editor()
+
+    def _build_editor(self):
+        for w in self._ed.winfo_children(): w.destroy()
+        self._vars = {}
+        fields = [
+            ("portal_id",  "ID портала:",        "portal_001"),
+            ("from",       "Из сцены (from):",   "aethoria_city"),
+            ("to",         "В сцену (to):",       "dark_forest"),
+            ("spawn_x",    "Spawn X (тайлы):",   "60"),
+            ("spawn_y",    "Spawn Y (тайлы):",   "60"),
+            ("label",      "Метка (отображение):","→ Тёмный лес"),
+        ]
+        for key, lbl_text, placeholder in fields:
+            fr = tk.Frame(self._ed, bg=C["panel"]); fr.pack(fill="x", pady=3)
+            tk.Label(fr, text=lbl_text, bg=C["panel"], fg=C["muted"],
+                     font=("Segoe UI",9), width=20, anchor="w").pack(side="left")
+            var = tk.StringVar(value=placeholder)
+            self._vars[key] = var
+            tk.Entry(fr, textvariable=var, bg=C["input_bg"], fg=C["text"],
+                     relief="flat", font=("Segoe UI",9)).pack(side="left", fill="x", expand=True, padx=4)
+
+        # Двунаправленный
+        bidi_var = tk.BooleanVar(value=False)
+        self._vars["bidirectional"] = bidi_var
+        tk.Checkbutton(self._ed, text="Двунаправленный (создать обратный портал)",
+                       variable=bidi_var, bg=C["panel"], fg=C["text"],
+                       selectcolor=C["panel3"], activebackground=C["panel"],
+                       font=("Segoe UI",9)).pack(anchor="w", pady=4)
+
+        # Выпадающие для сцен
+        if self._scenes:
+            for key in ("from","to"):
+                # Находим entry и делаем combobox — просто обновим значения
+                pass  # Entry достаточно, сцены видны в графе
+
+        btn(self._ed, "✅ Применить", self._apply_edit, C["green"], "black",
+            padx=10, pady=5).pack(pady=6)
+
+    # ── Данные ────────────────────────────────────────────────
+    def _load(self):
+        p = self.project_root / self.LINKS_FILE
+        if p.exists():
+            try: self._links = json.loads(p.read_text(encoding="utf-8"))
+            except: self._links = []
+        # Загружаем сцены из game_config
+        cfg_p = self.project_root / self.SCENES_CFG
+        if cfg_p.exists():
+            try:
+                cfg = json.loads(cfg_p.read_text(encoding="utf-8"))
+                self._scenes = cfg.get("location",{}).get("zones",[])
+            except: pass
+        self._refresh_list()
+        self._auto_layout()
+        self._refresh_graph()
+
+    def _save(self):
+        p = self.project_root / self.LINKS_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Фильтруем авто-back
+        out = [l for l in self._links
+               if not l.get("portal_id","").endswith("_back")]
+        p.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        messagebox.showinfo("Сохранено", f"portal_links.json сохранён\n{len(out)} связей.",
+                            parent=self.frame.winfo_toplevel())
+
+    def _refresh_list(self):
+        self._listbox.delete(0, "end")
+        for lnk in self._links:
+            if lnk.get("portal_id","").endswith("_back"): continue
+            bidi = "↔" if lnk.get("bidirectional") else "→"
+            self._listbox.insert("end",
+                f"  {lnk.get('portal_id','')}  {lnk.get('from','')} {bidi} {lnk.get('to','')}")
+
+    def _on_select(self, *_):
+        sel = self._listbox.curselection()
+        if not sel: return
+        # Индекс в видимом списке (без _back)
+        visible = [i for i,l in enumerate(self._links)
+                   if not l.get("portal_id","").endswith("_back")]
+        if sel[0] >= len(visible): return
+        self._sel_idx = visible[sel[0]]
+        lnk = self._links[self._sel_idx]
+        for key, var in self._vars.items():
+            if isinstance(var, tk.BooleanVar):
+                var.set(bool(lnk.get(key, False)))
+            else:
+                var.set(str(lnk.get(key, "")))
+        self._refresh_graph()
+
+    def _new_link(self):
+        new = {"portal_id": f"portal_{len(self._links)+1:03d}",
+               "from": self._scenes[0] if self._scenes else "scene_a",
+               "to":   self._scenes[1] if len(self._scenes)>1 else "scene_b",
+               "spawn_x": 60, "spawn_y": 60,
+               "label": "→ Новая локация",
+               "bidirectional": False}
+        self._links.append(new)
+        self._sel_idx = len(self._links) - 1
+        self._refresh_list()
+        self._listbox.selection_clear(0, "end")
+        vis_idx = sum(1 for l in self._links[:self._sel_idx]
+                      if not l.get("portal_id","").endswith("_back"))
+        self._listbox.selection_set(vis_idx)
+        for key, var in self._vars.items():
+            if isinstance(var, tk.BooleanVar): var.set(new.get(key, False))
+            else: var.set(str(new.get(key, "")))
+        self._refresh_graph()
+
+    def _delete_link(self):
+        if self._sel_idx < 0 or self._sel_idx >= len(self._links): return
+        pid = self._links[self._sel_idx].get("portal_id","")
+        # Удаляем связь и возможный _back
+        self._links = [l for l in self._links
+                       if l.get("portal_id") != pid and
+                          l.get("portal_id") != pid+"_back"]
+        self._sel_idx = -1
+        self._refresh_list()
+        self._refresh_graph()
+
+    def _apply_edit(self):
+        if self._sel_idx < 0 or self._sel_idx >= len(self._links): return
+        lnk = self._links[self._sel_idx]
+        for key, var in self._vars.items():
+            if isinstance(var, tk.BooleanVar):
+                lnk[key] = var.get()
+            else:
+                v = var.get()
+                if key in ("spawn_x","spawn_y"):
+                    try: v = float(v)
+                    except: v = 60.0
+                lnk[key] = v
+        # Обновляем/удаляем _back если bidirectional изменился
+        pid = lnk.get("portal_id","")
+        self._links = [l for l in self._links if l.get("portal_id") != pid+"_back"]
+        if lnk.get("bidirectional"):
+            self._links.append({
+                "portal_id":     pid + "_back",
+                "from":          lnk.get("to",""),
+                "to":            lnk.get("from",""),
+                "spawn_x":       lnk.get("spawn_x",60),
+                "spawn_y":       lnk.get("spawn_y",60),
+                "label":         "↩ " + str(lnk.get("from","")),
+                "bidirectional": False,
+            })
+        self._refresh_list()
+        self._refresh_graph()
+
+    # ── Граф ─────────────────────────────────────────────────
+    def _auto_layout(self):
+        """Расставляет узлы-сцены по кругу если нет сохранённых позиций."""
+        if not self._scenes: return
+        import math
+        cx, cy = 300, 220
+        r = min(180, 40 * len(self._scenes))
+        for i, sc in enumerate(self._scenes):
+            if sc not in self._node_pos:
+                angle = 2 * math.pi * i / len(self._scenes) - math.pi/2
+                self._node_pos[sc] = (
+                    int(cx + r * math.cos(angle)),
+                    int(cy + r * math.sin(angle))
+                )
+
+    def _refresh_graph(self):
+        cv = self._graph; cv.delete("all")
+        W = cv.winfo_width()  or 600
+        H = cv.winfo_height() or 400
+
+        # Добираем сцены из связей
+        for lnk in self._links:
+            for k in ("from","to"):
+                sc = lnk.get(k,"")
+                if sc and sc not in self._scenes:
+                    self._scenes.append(sc)
+        self._auto_layout()
+
+        # Рисуем стрелки-связи
+        for lnk in self._links:
+            if lnk.get("portal_id","").endswith("_back"): continue
+            fr  = lnk.get("from",""); to = lnk.get("to","")
+            p1  = self._node_pos.get(fr)
+            p2  = self._node_pos.get(to)
+            if not p1 or not p2: continue
+            bidi = lnk.get("bidirectional", False)
+            # Цвет в зависимости от выделения
+            sel_pid = self._links[self._sel_idx].get("portal_id","") if self._sel_idx >= 0 else ""
+            is_sel = lnk.get("portal_id","") == sel_pid
+            color = C["gold"] if is_sel else C["accent2"]
+            lw = 3 if is_sel else 1
+
+            # Линия
+            cv.create_line(p1[0], p1[1], p2[0], p2[1],
+                           fill=color, width=lw, arrow="last" if not bidi else "both",
+                           arrowshape=(10,12,4), smooth=True)
+            # Метка
+            mx = (p1[0]+p2[0])//2; my = (p1[1]+p2[1])//2
+            label = lnk.get("label","") or lnk.get("portal_id","")
+            cv.create_rectangle(mx-2, my-8, mx+len(label)*5+2, my+8,
+                                 fill=C["panel"], outline="")
+            cv.create_text(mx, my, text=label, fill=color,
+                           font=("Segoe UI",7,"bold"))
+
+        # Рисуем узлы-сцены
+        NODE_R = 32
+        for sc, (nx,ny) in self._node_pos.items():
+            # Проверяем связанность
+            linked = any(l.get("from")==sc or l.get("to")==sc for l in self._links)
+            fill = C["accent"] if linked else C["panel2"]
+            outline = C["gold2"] if linked else C["border"]
+            cv.create_oval(nx-NODE_R, ny-NODE_R, nx+NODE_R, ny+NODE_R,
+                           fill=fill, outline=outline, width=2, tags=("node", sc))
+            # Иконка
+            cv.create_text(nx, ny-8, text="🌍", font=("Segoe UI",14), tags=("node",sc))
+            # Имя
+            short = sc.replace("_"," ")[:12]
+            cv.create_text(nx, ny+14, text=short, fill=C["text"],
+                           font=("Segoe UI",7,"bold"), tags=("node",sc))
+            # Кол-во связей
+            n_out = sum(1 for l in self._links if l.get("from")==sc and
+                        not l.get("portal_id","").endswith("_back"))
+            if n_out:
+                cv.create_text(nx+NODE_R-4, ny-NODE_R+8, text=str(n_out),
+                               fill=C["gold"], font=("Segoe UI",8,"bold"))
+
+    def _graph_click(self, e):
+        NODE_R = 32
+        for sc, (nx,ny) in self._node_pos.items():
+            if abs(e.x-nx) <= NODE_R and abs(e.y-ny) <= NODE_R:
+                self._drag_node = sc
+                self._drag_ox = e.x - nx
+                self._drag_oy = e.y - ny
+                return
+        self._drag_node = None
+
+    def _graph_drag(self, e):
+        if not self._drag_node: return
+        self._node_pos[self._drag_node] = (e.x - self._drag_ox, e.y - self._drag_oy)
+        self._refresh_graph()
+
+    def _graph_release(self, e):
+        self._drag_node = None
+
+
 class AethoriaEditor:
     def __init__(self):
         self.root = tk.Tk()
@@ -5017,6 +5779,9 @@ class AethoriaEditor:
         self.project_root = find_project_root()
         self.mapdata = MapData()
 
+        # Загружаем пользовательские тайлы ДО создания вкладок
+        _load_custom_tiles(self.project_root)
+
         # ── АВТОЗАГРУЗКА map.json при старте ──────────────────
         _map_path = self.project_root / "assets" / "map.json"
         if _map_path.exists():
@@ -5028,33 +5793,77 @@ class AethoriaEditor:
             except Exception as _e:
                 print(f"[WARNING] Не удалось загрузить map.json: {_e}")
         else:
-            # Файла нет — фиксируем путь, первый Ctrl+S запишет туда
             self.mapdata.filepath = str(_map_path)
 
         # Заголовок
         self._build_titlebar()
 
-        # Основной Notebook
+        # ── Главный Notebook: 6 вкладок вместо 14 ─────────────
         self.notebook = ttk.Notebook(self.root, style="Dark.TNotebook")
-        self.notebook.pack(fill="both", expand=True, padx=0, pady=0)
+        self.notebook.pack(fill="both", expand=True)
 
-        # Вкладки
-        self.map_tab    = MapTab(self.notebook, self.mapdata, self.project_root)
-        self.locations_tab = LocationsTab(self.notebook, self.project_root, lambda: self.map_tab)
-        self.asset_tab  = AssetPipelineTab(self.notebook, self.project_root)
-        self.quest_tab  = QuestEditorTab(self.notebook, self.project_root)
-        self.dlg_tab    = DialogueEditorTab(self.notebook, self.project_root)
-        self.config_tab = GameConfigTab(self.notebook, self.project_root)
-        self.prefab_tab = PrefabSystemTab(self.notebook, self.project_root, lambda: self.map_tab)
-        self.login_tab  = LoginScreenTab(self.notebook, self.project_root)
-        self.char_tab   = CharacterSelectTab(self.notebook, self.project_root)
-        self.hud_tab    = UIEditorTab(self.notebook, self.project_root)
+        # ══════════════════════════════════════════════════════
+        # 1. 🗺 МИР — Карта + Локации + Порталы + Префабы
+        # ══════════════════════════════════════════════════════
+        world_frame = tk.Frame(self.notebook, bg=C["bg"])
+        self.notebook.add(world_frame, text="🗺  Мир")
+        world_nb = ttk.Notebook(world_frame, style="Dark.TNotebook")
+        world_nb.pack(fill="both", expand=True)
+        self.map_tab          = MapTab(world_nb, self.mapdata, self.project_root)
+        self.locations_tab    = LocationsTab(world_nb, self.project_root, lambda: self.map_tab)
+        self.portal_links_tab = PortalLinksTab(world_nb, self.project_root)
+        self.prefab_tab       = PrefabSystemTab(world_nb, self.project_root, lambda: self.map_tab)
 
-        # ── MMORPG вкладки ─────────────────────────────────────
+        # ══════════════════════════════════════════════════════
+        # 2. 🎨 АССЕТЫ — Анимации + Тайлсеты
+        # ══════════════════════════════════════════════════════
+        assets_frame = tk.Frame(self.notebook, bg=C["bg"])
+        self.notebook.add(assets_frame, text="🎨  Ассеты")
+        assets_nb = ttk.Notebook(assets_frame, style="Dark.TNotebook")
+        assets_nb.pack(fill="both", expand=True)
+        self.asset_tab   = AssetPipelineTab(assets_nb, self.project_root)
+        self.tileset_tab = TilesetTab(assets_nb, self.project_root)
+
+        # ══════════════════════════════════════════════════════
+        # 3. 📖 НАРРАТИВ — Квесты + Диалоги
+        # ══════════════════════════════════════════════════════
+        narrative_frame = tk.Frame(self.notebook, bg=C["bg"])
+        self.notebook.add(narrative_frame, text="📖  Нарратив")
+        narrative_nb = ttk.Notebook(narrative_frame, style="Dark.TNotebook")
+        narrative_nb.pack(fill="both", expand=True)
+        self.quest_tab = QuestEditorTab(narrative_nb, self.project_root)
+        self.dlg_tab   = DialogueEditorTab(narrative_nb, self.project_root)
+
+        # ══════════════════════════════════════════════════════
+        # 4. 🧙 ПЕРСОНАЖИ — Выбор + Классы + Предметы
+        # ══════════════════════════════════════════════════════
+        chars_frame = tk.Frame(self.notebook, bg=C["bg"])
+        self.notebook.add(chars_frame, text="🧙  Персонажи")
+        chars_nb = ttk.Notebook(chars_frame, style="Dark.TNotebook")
+        chars_nb.pack(fill="both", expand=True)
+        self.char_tab = CharacterSelectTab(chars_nb, self.project_root)
         if MMO_TABS:
-            self.classes_tab = ClassesTab(self.notebook, self.project_root)
-            self.items_tab   = ItemsTab(self.notebook, self.project_root)
-            self.server_tab  = ServerTab(self.notebook, self.project_root)
+            self.classes_tab = ClassesTab(chars_nb, self.project_root)
+            self.items_tab   = ItemsTab(chars_nb, self.project_root)
+        else:
+            # Заглушка если aethoria_mmo_tabs не найден
+            _ph = tk.Frame(chars_nb, bg=C["bg"])
+            chars_nb.add(_ph, text="⚔ Классы")
+            tk.Label(_ph, text="Установи aethoria_mmo_tabs.py\nрядом с редактором",
+                     bg=C["bg"], fg=C["muted"], font=("Segoe UI",11)).pack(expand=True)
+
+        # ══════════════════════════════════════════════════════
+        # 5. ⚙ НАСТРОЙКИ — Конфиг + Сервер + Интерфейс
+        # ══════════════════════════════════════════════════════
+        settings_frame = tk.Frame(self.notebook, bg=C["bg"])
+        self.notebook.add(settings_frame, text="⚙  Настройки")
+        settings_nb = ttk.Notebook(settings_frame, style="Dark.TNotebook")
+        settings_nb.pack(fill="both", expand=True)
+        self.config_tab = GameConfigTab(settings_nb, self.project_root)
+        if MMO_TABS:
+            self.server_tab = ServerTab(settings_nb, self.project_root)
+        self.login_tab = LoginScreenTab(settings_nb, self.project_root)
+        self.hud_tab   = UIEditorTab(settings_nb, self.project_root)
 
         # Горячие клавиши
         self._bind_keys()
@@ -5070,41 +5879,62 @@ class AethoriaEditor:
         bar = tk.Frame(self.root, bg=C["panel"], pady=0)
         bar.pack(fill="x")
 
-        # Логотип
-        tk.Label(bar, text="⚔", bg=C["panel"], fg=C["gold"],
-                font=("Segoe UI",16), padx=8).pack(side="left")
-        tk.Label(bar, text="Papaz & KuponaLoa", bg=C["panel"], fg=C["gold2"],
-                font=("Segoe UI",12,"bold"), padx=2).pack(side="left")
-        tk.Label(bar, text=f"Game Dev Studio v{VERSION}", bg=C["panel"], fg=C["muted"],
-                font=("Segoe UI",9), padx=4).pack(side="left")
+        # ── Логотип ────────────────────────────────────────────────
+        logo_c = tk.Canvas(bar, width=34, height=34, bg=C["panel"], highlightthickness=0)
+        logo_c.pack(side="left", padx=(6, 2), pady=2)
+        # Фоновый ромб
+        logo_c.create_polygon(17,2, 32,17, 17,32, 2,17,
+                               fill="#18004a", outline="#8c3df5", width=2)
+        # Золотой крест (меч)
+        logo_c.create_rectangle(15, 6, 19, 28, fill="#f0c040", outline="")
+        logo_c.create_rectangle(8, 14, 26, 18, fill="#f0c040", outline="")
+        # Блик
+        logo_c.create_oval(20, 7, 24, 11, fill="#ffe880", outline="")
 
-        # Инфо о проекте
+        # ── Название ───────────────────────────────────────────────
+        name_fr = tk.Frame(bar, bg=C["panel"])
+        name_fr.pack(side="left", padx=(2, 0))
+        tk.Label(name_fr, text="AETHORIA", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI", 13, "bold")).pack(side="left")
+        tk.Label(name_fr, text=": Eternal Realms", bg=C["panel"], fg=C["accent2"],
+                 font=("Segoe UI", 10)).pack(side="left")
+
+        sep_lbl = tk.Label(bar, text=" │ ", bg=C["panel"], fg=C["border"],
+                           font=("Segoe UI", 11))
+        sep_lbl.pack(side="left")
+
+        tk.Label(bar, text=f"Editor v{VERSION}", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI", 9)).pack(side="left")
+
         proj_text = str(self.project_root.name) if self.project_root else "Нет проекта"
-        tk.Label(bar, text=f"📁 {proj_text}", bg=C["panel"], fg=C["cyan"],
-                font=("Segoe UI",9), padx=20).pack(side="left")
+        tk.Label(bar, text=f"  📁 {proj_text}", bg=C["panel"], fg=C["cyan"],
+                 font=("Segoe UI", 9)).pack(side="left", padx=(10, 0))
 
-        # Кнопки
-        btn(bar,"❓ Помощь",self._show_help,padx=8,pady=4).pack(side="right",padx=4)
-        btn(bar,"🔍 О редакторе",self._show_about,padx=8,pady=4).pack(side="right",padx=4)
+        # ── Кнопки справа ─────────────────────────────────────────
+        btn(bar, "❓ Помощь",    self._show_help,  padx=8, pady=4).pack(side="right", padx=2)
+        btn(bar, "🔍 О редакторе", self._show_about, padx=8, pady=4).pack(side="right", padx=2)
+
+        # ── Автосохранение статус ──────────────────────────────────
+        self._autosave_label = tk.Label(bar, text="", bg=C["panel"], fg=C["green"],
+                                        font=("Segoe UI", 8))
+        self._autosave_label.pack(side="right", padx=8)
 
     def _build_statusbar(self):
         sb = tk.Frame(self.root, bg=C["panel2"], pady=3)
         sb.pack(fill="x", side="bottom")
-        self.status_var = tk.StringVar(value=f"Papaz & KuponaLoa Editor v{VERSION} готов | Проект: {self.project_root}")
+        self.status_var = tk.StringVar(
+            value=f"Papaz & KuponaLoa Editor v{VERSION} готов | Проект: {self.project_root}")
         tk.Label(sb, textvariable=self.status_var, bg=C["panel2"], fg=C["muted"],
                 font=("Segoe UI",8), padx=12, anchor="w").pack(side="left")
-
         caps = []
         if PILLOW: caps.append("✅ Pillow")
         else: caps.append("❌ Pillow")
         if CV2: caps.append("✅ OpenCV")
         else: caps.append("❌ OpenCV")
-        # Check ffmpeg
         try:
-            r = subprocess.run(["ffmpeg","-version"],capture_output=True,timeout=2)
+            subprocess.run(["ffmpeg","-version"],capture_output=True,timeout=2)
             caps.append("✅ ffmpeg")
         except: caps.append("❌ ffmpeg")
-
         tk.Label(sb, text="  |  ".join(caps), bg=C["panel2"], fg=C["muted"],
                 font=("Segoe UI",8), padx=12, anchor="e").pack(side="right")
 
@@ -5114,15 +5944,12 @@ class AethoriaEditor:
         r.bind("<Control-y>", lambda e: self.map_tab._redo())
         r.bind("<Control-s>", lambda e: self._save_all())
         r.bind("<F1>",        lambda e: self._show_help())
+        # Ctrl+1-5 → главные вкладки
         r.bind("<Control-1>", lambda e: self.notebook.select(0))
         r.bind("<Control-2>", lambda e: self.notebook.select(1))
         r.bind("<Control-3>", lambda e: self.notebook.select(2))
         r.bind("<Control-4>", lambda e: self.notebook.select(3))
         r.bind("<Control-5>", lambda e: self.notebook.select(4))
-        r.bind("<Control-6>", lambda e: self.notebook.select(5))
-        r.bind("<Control-7>", lambda e: self.notebook.select(6))
-        r.bind("<Control-8>", lambda e: self.notebook.select(7))
-        r.bind("<Control-9>", lambda e: self.notebook.select(6))  # Префабы
 
     # ── Персистентность состояния ──────────────────────────────
     @property
@@ -5130,24 +5957,18 @@ class AethoriaEditor:
         return self.project_root / "assets" / ".editor_state.json"
 
     def _restore_state(self):
-        """Восстанавливает активную вкладку и положение карты"""
         try:
             if self._state_path.exists():
                 s = json.loads(self._state_path.read_text(encoding="utf-8"))
                 tab = s.get("active_tab", 0)
-                self.notebook.select(min(tab, 9))
+                self.notebook.select(min(tab, self.notebook.index("end") - 1))
         except Exception:
             pass
 
     def _save_state(self):
-        """Сохраняет активную вкладку и прочее UI-состояние"""
         try:
-            state = {
-                "active_tab": self.notebook.index(self.notebook.select()),
-            }
-            self._state_path.write_text(
-                json.dumps(state, indent=2), encoding="utf-8"
-            )
+            state = {"active_tab": self.notebook.index(self.notebook.select())}
+            self._state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         except Exception:
             pass
 
@@ -5160,6 +5981,8 @@ class AethoriaEditor:
         try: self.map_tab._save()
         except: pass
         try: self.locations_tab._save_props()
+        except: pass
+        try: self.portal_links_tab._save()
         except: pass
         try: self.quest_tab._save_all()
         except: pass
@@ -5184,81 +6007,65 @@ class AethoriaEditor:
             except: pass
         self._save_state()
         self.status_var.set("💾 Всё сохранено!")
-        self.root.after(3000, lambda: self.status_var.set(f"Papaz & KuponaLoa Editor v{VERSION} | {self.project_root}"))
+        self.root.after(3000, lambda: self.status_var.set(
+            f"Papaz & KuponaLoa Editor v{VERSION} | {self.project_root}"))
 
     def _show_help(self):
         win = tk.Toplevel(self.root)
         win.title("Помощь — Papaz Editor v1.3")
-        win.geometry("600x600")
+        win.geometry("620x640")
         win.configure(bg=C["panel"])
-
         tk.Label(win, text="⚔ Papaz & KuponaLoa Editor v1.3 — Помощь", bg=C["panel"],
                 fg=C["gold2"], font=("Segoe UI",13,"bold")).pack(pady=12)
-
-        fr, txt = scrolled_text(win, height=25, width=70)
+        fr, txt = scrolled_text(win, height=28, width=72)
         fr.pack(fill="both", expand=True, padx=12, pady=4)
         help_text = """
-🗺 ВКЛАДКА «КАРТА МИРА»
-──────────────────────────────────────────────────
-P — рисовать тайлы
-E — ластик
-F — заливка (flood fill)
-V — выбрать объект
-N — разместить сущность
-I — пипетка (захватить тип тайла)
-+ / - — приближение / отдаление
-0 — показать всю карту
-C — перейти к городу
-Ctrl+Z / Ctrl+Y — отмена / повтор
-ПКМ / СКМ — перемещение камеры
-Колесо мыши — зум
+СТРУКТУРА РЕДАКТОРА (5 вкладок)
+══════════════════════════════════════════════════════════
 
-🎬 ВКЛАДКА «АССЕТЫ» — PIPELINE АНИМАЦИЙ
-──────────────────────────────────────────────────
-• Нажми «Выбрать файл» и выбери MP4/GIF/PNG
-• Редактор сам определит сущность и действие
-  из имени файла (player_walk.mp4 → player / walk)
-• Можно задать имя и действие вручную
-• Установи размер кадра (64×64 рекомендуется)
-• Установи FPS (12 для плавной анимации)
-• Результат: спрайт-шит в assets/textures/sprites/
-  и запись в assets/animations.json
+🗺 МИР
+──────────────────────────────────────────────────────────
+  Карта     — тайлы 120×120, инструменты рисования
+  Локации   — сцены, метаданные, переключение карты
+  Порталы   — граф связей порталов между сценами
+  Префабы   — шаблоны врагов/НПС/объектов
 
-ФОРМАТ animations.json:
-{
-  "player": {
-    "walk": {
-      "sheet": "player_walk.png",
-      "frames": 8, "cols": 8,
-      "width": 64, "height": 64,
-      "fps": 12, "loop": true
-    }
-  }
-}
+  Горячие клавиши на карте:
+  P рисовать   E ластик   F заливка   V выбор
+  N сущность   I пипетка   0 весь вид
+  Ctrl+Z / Ctrl+Y — undo / redo
+  ПКМ/СКМ — камера, колесо — зум
 
-⚔ ВКЛАДКА «КВЕСТЫ»
-──────────────────────────────────────────────────
-• Создавай квесты с полными свойствами
-• Типы: kill/collect/escort/explore/deliver/talk
-• Цели: убить X врагов, собрать X предметов и т.д.
-• Награды: диапазон золота, XP, предметы
-• Диалог: три фазы — предложение/прогресс/завершение
-• Результат: assets/quests.json
+🎨 АССЕТЫ
+──────────────────────────────────────────────────────────
+  Анимации  — MP4/GIF/PNG → спрайт-шит + animations.json
+              Авто-определение сущности из имени файла
+  Тайлсеты  — нарезка любой картинки на тайлы,
+              авто-добавление в custom_tiles.json
 
-💬 ВКЛАДКА «ДИАЛОГИ»
-──────────────────────────────────────────────────
-• Выбери персонажа из списка слева
-• Для мобов: aggro/combat/death/idle
-• Для НПС: greeting/trade/quest/warning/farewell
-• Добавляй, редактируй, удаляй и перемещай реплики
-• Используй {player} в тексте — подставится имя игрока
-• Результат: assets/dialogues.json
+📖 НАРРАТИВ
+──────────────────────────────────────────────────────────
+  Квесты    — kill/collect/escort/explore, цели, награды
+  Диалоги   — реплики НПС и мобов по фазам
 
-ГОРЯЧИЕ КЛАВИШИ (глобальные):
-──────────────────────────────────────────────────
-Ctrl+S       — сохранить всё
-Ctrl+1-4     — переключить вкладку
-F1           — эта справка
+🧙 ПЕРСОНАЖИ
+──────────────────────────────────────────────────────────
+  Персонажи — экран выбора, внешний вид классов
+  Классы    — деревья навыков, статы, формулы урона
+  Предметы  — база предметов, таблицы лута
+
+⚙ НАСТРОЙКИ
+──────────────────────────────────────────────────────────
+  Конфиг    — spawn, враги, свет, шейдеры, слои
+  Сервер    — зоны, инстансы, рейты, гильдии
+  Логин     — экран входа
+  HUD/UI    — полосы HP/MP/XP, скиллбар, миникарта
+
+ГЛОБАЛЬНЫЕ ГОРЯЧИЕ КЛАВИШИ:
+──────────────────────────────────────────────────────────
+  Ctrl+S     — сохранить всё
+  Ctrl+1..5  — переключить главную вкладку
+  F1         — эта справка
 """
         txt.insert("1.0", help_text)
         txt.config(state="disabled")
@@ -5266,13 +6073,12 @@ F1           — эта справка
     def _show_about(self):
         messagebox.showinfo("О редакторе",
             f"Papaz & KuponaLoa Game Dev Studio v{VERSION}\n\n"
-            "Полный пайплайн разработки:\n"
-            "• Редактор карты мира 120×120 тайлов\n"
-            "• MP4/GIF/PNG → Sprite Sheet + JSON авто\n"
-            "• Редактор квестов с диалогами и наградами\n"
-            "• Редактор диалогов НПС и мобов\n\n"
-            f"Движок: SFML 2.5+ C++17\n"
-            f"Pillow: {'✅' if PILLOW else '❌'}  OpenCV: {'✅' if CV2 else '❌'}"
+            "5 главных вкладок:\n"
+            "  🗺 Мир  🎨 Ассеты  📖 Нарратив  🧙 Персонажи  ⚙ Настройки\n\n"
+            "Движок: SFML 2.5+ C++17\n"
+            f"Pillow: {'✅' if PILLOW else '❌'}   "
+            f"OpenCV: {'✅' if CV2 else '❌'}   "
+            f"MMO tabs: {'✅' if MMO_TABS else '❌'}"
         )
 
     def run(self):
