@@ -95,30 +95,6 @@ struct Item {
 };
 
 // ════════════════════════════════════════════════════════════════
-// LOOT SYSTEM (Этап 3)
-// ════════════════════════════════════════════════════════════════
-enum class Rarity { COMMON, UNCOMMON, RARE, EPIC };
-static const char* rarityName(Rarity r){
-    switch(r){ case Rarity::UNCOMMON: return "Необычный"; case Rarity::RARE: return "Редкий";
-               case Rarity::EPIC:     return "Эпический"; default: return "Обычный"; }
-}
-static sf::Color rarityColor(Rarity r){
-    switch(r){ case Rarity::UNCOMMON: return sf::Color(50,200,100);
-               case Rarity::RARE:     return sf::Color(60,100,255);
-               case Rarity::EPIC:     return sf::Color(180,50,220);
-               default:               return sf::Color(180,180,180); }
-}
-
-struct LootDrop {
-    V2          pos;
-    Item        item;
-    Rarity      rarity;
-    float       lifeTime = 30.f;   // исчезает через 30 сек
-    float       bobTimer = 0.f;
-    bool        picked   = false;
-};
-
-// ════════════════════════════════════════════════════════════════
 // ENEMY
 // ════════════════════════════════════════════════════════════════
 struct Enemy {
@@ -1903,7 +1879,7 @@ public:
                 float dx=player.pos.x-wx, dy=player.pos.y-wy;
                 if(!opened && dx*dx+dy*dy < interactRange*interactRange && fontLoaded) {
                     sf::Text hint; hint.setFont(font);
-                    hint.setString("[E] Открыть");
+                    hint.setString(U("[E] Открыть"));
                     hint.setCharacterSize(11);
                     hint.setFillColor(sf::Color(255,220,60));
                     auto b=hint.getLocalBounds();
@@ -2049,7 +2025,7 @@ public:
             // Метка внутри зоны
             if (fontLoaded && !t.name.empty()) {
                 sf::Text lbl; lbl.setFont(font);
-                lbl.setString(t.name);
+                lbl.setString(U(t.name));
                 lbl.setCharacterSize(10);
                 lbl.setFillColor(sf::Color(200,200,255,
                     uint8_t(140 + 60*std::sin(gameTime*2))));
@@ -2066,7 +2042,7 @@ public:
                 : (std::abs(dx) < t.w/2+16 && std::abs(dy) < t.h/2+16);
             if (nearPlayer && t.event == TriggerEvent::INTERACT && fontLoaded) {
                 sf::Text hint; hint.setFont(font);
-                hint.setString("[E] " + t.name);
+                hint.setString(U("[E] " + t.name));
                 hint.setCharacterSize(12);
                 hint.setFillColor(sf::Color(255,220,60,
                     uint8_t(200 + 55*std::sin(gameTime*5))));
@@ -2141,7 +2117,7 @@ public:
     void drawFloatTexts(){
         if(!fontLoaded) return;
         for(auto& ft:floatingTexts){
-            sf::Text txt; txt.setFont(font); txt.setString(ft.text);
+            sf::Text txt; txt.setFont(font); txt.setString(U(ft.text));
             txt.setCharacterSize(20); txt.setFillColor(ft.color);
             auto b=txt.getLocalBounds();
             txt.setOrigin(b.width/2,b.height/2);
@@ -2204,8 +2180,8 @@ public:
 
         // Kills & gold (мини-строка)
         sf::Text statsLine; statsLine.setFont(font);
-        statsLine.setString("Kills:" + std::to_string(player.kills) +
-                             "  Gold:" + std::to_string(player.gold));
+        statsLine.setString(U("Kills:" + std::to_string(player.kills) +
+                             "  Gold:" + std::to_string(player.gold)));
         statsLine.setCharacterSize(12); statsLine.setFillColor(sf::Color(140,130,160));
         statsLine.setPosition(20, WINDOW_H - 20);
         window.draw(statsLine);
