@@ -7,320 +7,323 @@
 ██╔══██║██╔══╝     ██║   ██╔══██║██║   ██║██╔══██╗██║██╔══██║
 ██║  ██║███████╗   ██║   ██║  ██║╚██████╔╝██║  ██║██║██║  ██║
 ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
-                    E T E R N A L   R E A L M S
+           E T E R N A L   R E A L M S
 ```
 
-**A handcrafted MMORPG engine built from scratch in C++ with SFML**
-
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](#-license)
-[![C++](https://img.shields.io/badge/C++-17-blue.svg)](https://isocpp.org/)
-[![SFML](https://img.shields.io/badge/SFML-2.6.1-green.svg)](https://www.sfml-dev.org/)
-[![Python](https://img.shields.io/badge/Editor-Python%203.10-yellow.svg)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](#-building)
+**MMORPG Engine (C++17 + SFML) with integrated Python Editor**
 
 </div>
 
 ---
 
-## ✨ Overview
+## 🌍 Language / Язык
 
-**Aethoria: Eternal Realms** is a from-scratch MMORPG engine and world editor.
-No Unity. No Unreal. Pure C++17 + SFML — every system written by hand.
-
-The project includes a **full-featured map editor** built in Python/Tkinter
-that exports directly to the engine's scene format, with automatic sync
-so the engine always sees the latest changes.
+**🇷🇺 Русский** | [🇺🇸 English](#english)
 
 ---
 
-## 🎮 Features
+# 🇷🇺 Русская версия
 
-<table>
-<tr>
-<td width="50%">
+## ✨ Обзор
 
-### Engine
-- ⚔️ Real-time combat with skills & combos
-- 👾 AI enemy system (Idle → Patrol → Aggro → Combat)
-- 🗺️ Tile-based world with 120×120 maps
-- 🧙 Entity system: NPC, enemies, objects, portals
-- 🎬 Spritesheet animation system
-- 🔊 Spatial audio manager
-- 🌐 Multi-scene world with transitions
-- 💾 JSON-based save/load
-- 🎨 Particle & floating text effects
+**Aethoria: Eternal Realms** — это полноценный MMORPG-движок, написанный с нуля на C++17 с использованием SFML.
 
-</td>
-<td width="50%">
+Ключевая идея проекта:
 
-### World Editor
-- 🖌️ Full tile painting with flood fill
-- 👺 Enemy & NPC placement
-- 📦 Prefab system (60+ built-in templates)
-- 🎭 Dialogue & quest editor
-- 🎬 Animation pipeline (video → spritesheet)
-- ⚙️ Game config editor
-- 🌍 Multi-scene manager
-- ↩️ Undo / Redo support
-- 🔄 Auto-sync editor → engine
+* собственная архитектура
+* data-driven подход (JSON)
+* встроенный инструмент разработки (редактор)
 
-</td>
-</tr>
-</table>
+Проект не использует сторонние игровые движки.
 
 ---
 
-## 🏗️ Architecture
+## 🎮 Возможности
+
+### ⚔ Движок
+
+* Реалтайм боевая система
+* AI: Idle → Patrol → Aggro → Combat
+* Тайловая карта
+* Entity system (NPC, враги, порталы)
+* Система анимаций (spritesheets)
+* Аудио (музыка + SFX)
+* Scene system
+* Загрузка/сохранение через JSON
+* Визуальные эффекты
+
+---
+
+### 🛠 Редактор (Python / Tkinter)
+
+* Редактор карт
+* Размещение NPC и врагов
+* Префабы
+* Квесты и диалоги
+* Конфигурация игры
+* Undo / Redo
+* Прямая синхронизация
+
+---
+
+## 🎨 Asset Pipeline
+
+Проект использует полностью **JSON-ориентированную систему ассетов**.
+
+### 📦 Структура
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    AETHORIA ENGINE                          │
-├──────────────┬──────────────┬──────────────┬───────────────┤
-│ SceneSystem  │ EntitySystem │  Animation   │  AudioManager │
-│              │              │   System     │               │
-│ • Load/Save  │ • NPC        │ • Spritesheet│ • SFX         │
-│ • Transition │ • Enemies    │ • Clips      │ • Music       │
-│ • Multi-map  │ • Objects    │ • Players    │ • Spatial     │
-│              │ • Portals    │              │               │
-├──────────────┴──────────────┴──────────────┴───────────────┤
-│                      GameEngine                             │
-│  Player • Camera • Combat • Particles • UI • Save/Load     │
-├─────────────────────────────────────────────────────────────┤
-│                    JSON / Assets                            │
-│  map.json  •  scenes/*.json  •  animations.json  •  ...    │
-└─────────────────────────────────────────────────────────────┘
-           ▲ auto-sync on save
-┌─────────────────────────────────────────────────────────────┐
-│                   WORLD EDITOR (Python)                     │
-│  Map Tab • Prefabs • Quests • Dialogues • Locations • HUD  │
-└─────────────────────────────────────────────────────────────┘
+assets/
+├── animations/
+├── fonts/
+├── maps/
+├── music/
+├── scenes/
+├── sounds/
+├── textures/
+├── dialogues.json
+├── items.json
+├── quests.json
+├── prefabs.json
+├── game_config.json
+├── server_config.json
+└── ui_config.json
 ```
 
 ---
 
-## 📁 Project Structure
+### 🗺 Сцены
+
+Сцены задаются через JSON и управляют:
+
+* логикой зоны
+* PvP
+* ограничениями уровня
+* параметрами окружения
+
+---
+
+### 🔄 Интеграция
+
+* редактор генерирует JSON
+* движок читает напрямую
+* без промежуточных форматов
+
+---
+
+## 🏗 Архитектура
 
 ```
-aethoria/
-├── 📂 src/
-│   ├── main.cpp                 # GameEngine — entry point
-│   ├── scene_system.hpp         # Scene load/save/switch
-│   ├── entity_system.hpp        # Universal entity system
-│   ├── animation_system.hpp     # Spritesheet animations
-│   ├── audio_manager.hpp        # Sound & music
-│   ├── prefab_system.hpp        # Object templates
-│   ├── json_parser.hpp          # Lightweight JSON parser
-│   └── aethoria_engine.hpp      # Engine constants & helpers
-│
-├── 📂 editor/
-│   └── aethoria_editor3.py      # Full world editor (Tkinter)
-│
-├── 📂 assets/
-│   ├── map.json                 # Main world map (editor output)
-│   ├── animations.json          # Animation configs
-│   ├── game_config.json         # Engine settings
-│   ├── dialogues.json           # NPC dialogue trees
-│   ├── quests.json              # Quest definitions
-│   ├── ui_config.json           # UI layout & colors
-│   ├── prefabs.json             # Custom prefab templates
-│   ├── 📂 scenes/               # Scene files (read by engine)
-│   │   └── aethoria_city.json
-│   ├── 📂 textures/sprites/     # Character spritesheets (.png)
-│   ├── 📂 sounds/               # Sound effects (.wav)
-│   ├── 📂 music/                # Background music (.ogg)
-│   └── 📂 fonts/                # Font files (.ttf)
-│
-├── CMakeLists.txt               # Build configuration
-├── build.bat                    # Windows one-click build
-├── build.sh                     # Linux/macOS build
-├── LICENSE                      # Proprietary — read before use
+ENGINE (C++)
+├── Scene System
+├── Entity System
+├── Animation
+├── Audio
+└── Core
+
+EDITOR (Python)
+├── Map Editor
+├── Quests
+├── Dialogues
+└── Config
+
+DATA
+└── JSON + Assets
+```
+
+---
+
+## 📁 Структура проекта
+
+```
+project_root/
+├── assets/
+├── build/
+├── docs/
+├── editor/
+├── saves/
+├── src/
+├── CMakeLists.txt
+├── build.sh
+├── build.bat
 └── README.md
 ```
 
 ---
 
-## 🔨 Building
+## 🔨 Сборка
 
-### Windows
+### 🐧 Linux / 🍎 macOS
 
-**Requirements:** [CMake 3.16+](https://cmake.org/download/) · [SFML 2.6.1](https://www.sfml-dev.org/download/sfml/2.6.1/) · Visual Studio 2019/2022 or MinGW
+```
+./build.sh
+```
 
-```bat
-REM 1. Extract SFML to C:\SFML-2.6.1
-REM 2. Run:
+Что делает скрипт:
+
+* проверяет cmake и компилятор
+* проверяет SFML
+* собирает проект
+* предлагает сразу запустить игру или редактор
+
+---
+
+### 🪟 Windows
+
+```
 build.bat
 ```
 
-The script auto-detects Visual Studio 2022 → 2019 → MinGW in that order.
+---
 
-**Manual build:**
-```bat
-mkdir build && cd build
-cmake .. -DSFML_DIR="C:\SFML-2.6.1\lib\cmake\SFML" -DCMAKE_PREFIX_PATH="C:\SFML-2.6.1"
-cmake --build . --config Release
-```
+## ⚙️ Особенности сборки
 
-### Linux
+* CMake автоматически подключает SFML
+* после сборки:
 
-```bash
-sudo apt-get install cmake build-essential libsfml-dev
-chmod +x build.sh && ./build.sh
-```
+  * копируются **assets/**
+  * копируются **SFML DLL**
 
-### macOS
-
-```bash
-brew install cmake sfml
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . -j$(sysctl -n hw.ncpu)
-```
+👉 проект запускается без ручной настройки
 
 ---
 
-## 🗺️ World Editor
+## ▶️ Запуск
 
-```bash
-# Python 3.10+ required
-# Optional — for video-to-spritesheet conversion:
-pip install pillow opencv-python
+После сборки:
 
-# Launch
+```
+./build/AETHORIA
+```
+
+или через build.sh (интерактивно)
+
+---
+
+## 🗺 Редактор
+
+```
 python editor/aethoria_editor3.py
 ```
 
-### Editor → Engine Sync
+---
 
-Every time you press **Ctrl+S** in the editor:
+## 🔄 Workflow
 
 ```
-editor saves  ──►  assets/map.json
-                         │
-                         └──►  assets/scenes/<scene_id>.json  ──►  engine ✓
+Редактор → JSON → Движок
 ```
 
-No manual copying. No restarts. Save and run.
-
-### Editor Tabs
-
-| Tab | Description |
-|-----|-------------|
-| 🗺 World Map | Tile painting, entity placement, collision editing |
-| 🎬 Assets | Video → spritesheet pipeline (ffmpeg / OpenCV) |
-| ⚔ Quests | Quest chain editor with objectives and rewards |
-| 💬 Dialogues | NPC dialogue trees per enemy/NPC type |
-| ⚙ Config | Game settings, spawn points, ambient lighting |
-| 🔑 Login Screen | Login UI text and color customization |
-| 🧙 Characters | Character select screen — classes and skins |
-| 🎮 HUD/UI | In-game HUD layout configuration |
-| 🌍 Locations | Multi-scene manager, scene metadata |
-| ⭐ Prefabs | 60+ drag-and-drop entity templates |
+* Ctrl+S в редакторе
+* данные сразу доступны игре
 
 ---
 
-## 🎮 Controls
+## 🎮 Управление
 
-| Key | Action |
-|-----|--------|
-| `W` `A` `S` `D` | Move |
-| `1` `2` `3` `4` | Use skills |
-| `7` | HP Potion |
-| `8` | MP Potion |
-| `E` | Interact with NPC / object |
-| `C` | Character stats panel |
-| `Tab` | Inventory |
-| `M` | Minimap |
-| `LMB` | Select target |
-| `Scroll wheel` | Zoom camera |
+| Кнопка | Действие    |
+| ------ | ----------- |
+| WASD   | движение    |
+| 1–4    | способности |
 
 ---
 
-## 🧩 Systems
+---
 
-<details>
-<summary><b>⚔️ Scene System</b></summary>
+# 🇺🇸 English
 
-Handles loading, saving, and switching between named scenes.
-Each scene is a JSON file in `assets/scenes/`. Supports fade transitions,
-per-scene spawn points, ambient color, and entity lists.
-The editor auto-syncs to the correct scene file on every save.
+## ✨ Overview
 
-</details>
+**Aethoria: Eternal Realms** is a custom-built MMORPG engine written in C++17 using SFML.
 
-<details>
-<summary><b>🧙 Entity System</b></summary>
+Core principles:
 
-Universal entity type: `PLAYER` · `ENEMY` · `NPC` · `OBJECT` · `PORTAL` · `ITEM_DROP`.
-Each entity has a unique `uint32_t` ID, world position, and a typed property bag
-(`strings`, `floats`, `ints`, `bools`). Supports save/load to JSON.
-
-</details>
-
-<details>
-<summary><b>🎬 Animation System</b></summary>
-
-Loads spritesheet configs from `animations.json`. Supports per-entity,
-per-action clips with configurable FPS, loop, and frame dimensions.
-Smart alpha detection — automatically removes white/black backgrounds
-from sprites that lack a proper alpha channel.
-
-</details>
-
-<details>
-<summary><b>⭐ Prefab System</b></summary>
-
-60+ built-in templates across 5 categories: enemies, NPCs, objects, zones, portals.
-Custom prefabs saved to `prefabs.json`. One-click placement from editor panel
-directly onto the world map with full property inheritance.
-
-</details>
-
-<details>
-<summary><b>🔊 Audio Manager</b></summary>
-
-Manages sound effects and background music via SFML Audio.
-Supports spatialized playback (distance-based volume falloff),
-pitch variation for natural-sounding repeated effects,
-and smooth music transitions.
-
-</details>
+* custom architecture
+* data-driven design (JSON)
+* integrated toolchain (editor)
 
 ---
 
-## 📋 Roadmap
+## 🎮 Features
 
-- [x] Core engine (render, input, camera)
-- [x] Entity system with JSON persistence
-- [x] Scene system with transitions
-- [x] World editor with 10 tabs
-- [x] Prefab system (60+ templates)
-- [x] Animation pipeline
-- [x] Editor → engine auto-sync
-- [ ] Autosave with backup rotation
-- [ ] Hot-reload (engine detects file changes)
-- [ ] Asset database with auto-discovery
-- [ ] Portal placement tool in editor
-- [ ] Region / instance system
-- [ ] Multiplayer foundation
+### Engine
+
+* Real-time combat
+* AI system
+* Tile-based world
+* Entity system
+* Animation system
+* Audio system
+* Scene system
+* JSON save/load
 
 ---
 
-## 📜 License
+### Editor
 
-**© 2025 PapaZ — All Rights Reserved**
-
-This source code is published for **viewing and educational purposes only.**
-Copying, modifying, distributing, or using any part of this code
-in your own projects is **strictly prohibited** without written permission.
-
-See [LICENSE](LICENSE) for the complete terms.
+* Map editor
+* NPC placement
+* Prefabs
+* Quests & dialogues
+* Config editor
+* Undo/Redo
+* Auto-sync
 
 ---
 
-<div align="center">
+## 🎨 Assets
 
-*No engine. No framework. Just code.*
+```
+assets/
+├── animations/
+├── fonts/
+├── maps/
+├── music/
+├── scenes/
+├── sounds/
+├── textures/
+└── *.json
+```
 
-**Built entirely from scratch.**
+* JSON-based pipeline
+* Sprite animations
+* Scene definitions
 
-</div>
+---
+
+## 🔨 Build
+
+### Linux / macOS
+
+```
+./build.sh
+```
+
+### Windows
+
+```
+build.bat
+```
+
+---
+
+## ▶️ Run
+
+```
+./build/AETHORIA
+```
+
+---
+
+## 🗺 Editor
+
+```
+python editor/aethoria_editor3.py
+```
+
+---
+
+## 📄 License
+
+See LICENSE
+
