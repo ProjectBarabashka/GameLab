@@ -67,6 +67,23 @@
         "gold": 150,
         "patrol": true
       }
+    },
+    {
+      "id": "pfb_custom_212579397",
+      "name": "Волк (рядовой) (копия)",
+      "category": "custom",
+      "kind": "enemy",
+      "type": "WOLF",
+      "emoji": "🐺",
+      "props": {
+        "level": 2,
+        "boss": false,
+        "hp": 60,
+        "dmg": 12,
+        "speed": 95,
+        "gold": 40,
+        "patrol": true
+      }
     }
   ]
 }

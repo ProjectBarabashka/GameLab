@@ -1,0 +1,20 @@
+[
+  {
+    "portal_id": "portal_001",
+    "from": "Aethoria City",
+    "to": "Dark Forest",
+    "spawn_x": 60,
+    "spawn_y": 60,
+    "label": "→ Новая локация",
+    "bidirectional": false
+  },
+  {
+    "portal_id": "portal_002",
+    "from": "Aethoria City",
+    "to": "Dark Forest",
+    "spawn_x": 60.0,
+    "spawn_y": 60.0,
+    "label": "→ Новая локация",
+    "bidirectional": false
+  }
+]

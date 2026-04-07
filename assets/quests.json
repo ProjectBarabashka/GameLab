@@ -174,5 +174,34 @@
       ]
     },
     "active": true
+  },
+  {
+    "id": "q005",
+    "name": "Новый квест",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "",
+    "description": "GOBLINS",
+    "objectives": [],
+    "rewards": {
+      "gold_min": 10,
+      "gold_max": 50,
+      "xp": 100,
+      "items": []
+    },
+    "dialogue": {
+      "offer": [
+        "1111"
+      ],
+      "progress": [
+        "...",
+        "gh"
+      ],
+      "complete": [
+        "Отлично!",
+        "XD"
+      ]
+    },
+    "active": true
   }
 ]
