@@ -50,7 +50,7 @@
 
 ## 🧠 ФИЛОСОФИЯ
 
-```id="philo"
+```
 DATA → JSON → ENGINE → WORLD
 ```
 
@@ -114,19 +114,17 @@ DATA → JSON → ENGINE → WORLD
 
 ### 🧍 Спрайты
 
-![sprites](assets/textures/sprites_preview.png)
-
----
-
-### 🗺 Мир
-
-![world](assets/maps/world_preview.png)
+<p align="center">
+  <img src="assets/textures/sprites/player_idle.png" width="160"/>
+  <img src="assets/textures/sprites/player_run.png" width="160"/>
+  <img src="assets/textures/sprites/wolf_idle.png" width="160"/>
+</p>
 
 ---
 
 ## 📦 ASSET SYSTEM
 
-```id="assets-tree"
+```
 assets/
 ├── animations/
 ├── fonts/
@@ -142,7 +140,7 @@ assets/
 
 ## 🏗 АРХИТЕКТУРА
 
-```id="arch"
+```
 ENGINE (C++)
 ├── Core
 ├── Scene
@@ -161,7 +159,7 @@ EDITOR (Python)
 
 ## 📁 СТРУКТУРА
 
-```id="tree"
+```
 project_root/
 ├── assets/
 ├── build/
@@ -180,7 +178,7 @@ project_root/
 
 ### 🐧 Linux / 🍎 macOS
 
-```id="build1"
+```
 ./build.sh
 ```
 
@@ -188,7 +186,7 @@ project_root/
 
 ### 🪟 Windows
 
-```id="build2"
+```
 build.bat
 ```
 
@@ -196,7 +194,7 @@ build.bat
 
 ## ▶️ ЗАПУСК
 
-```id="run"
+```
 ./build/AETHORIA
 ```
 
@@ -204,7 +202,7 @@ build.bat
 
 ## 🗺 РЕДАКТОР
 
-```id="editor"
+```
 python editor/aethoria_editor3.py
 ```
 
@@ -212,7 +210,7 @@ python editor/aethoria_editor3.py
 
 ## 🔄 WORKFLOW
 
-```id="flow"
+```
 EDITOR → JSON → ENGINE
 ```
 
@@ -270,12 +268,6 @@ EDITOR → JSON → ENGINE
 
 Custom MMORPG engine built from scratch.
 
-Inspired by:
-
-* Slavic mythology
-* Eastern fantasy
-* Industrial USSR aesthetics
-
 ---
 
 ## 🎮 FEATURES
@@ -291,21 +283,23 @@ Inspired by:
 
 ## 🎨 VISUALS
 
-![sprites](assets/textures/sprites_preview.png)
-
-![world](assets/maps/world_preview.png)
+<p align="center">
+  <img src="assets/textures/sprites/player_idle.png" width="160"/>
+  <img src="assets/textures/sprites/player_run.png" width="160"/>
+  <img src="assets/textures/sprites/wolf_idle.png" width="160"/>
+</p>
 
 ---
 
 ## 🔨 BUILD
 
-```id="b1"
+```
 ./build.sh
 ```
 
 or
 
-```id="b2"
+```
 build.bat
 ```
 
@@ -313,7 +307,7 @@ build.bat
 
 ## ▶️ RUN
 
-```id="b3"
+```
 ./build/AETHORIA
 ```
 
@@ -321,7 +315,7 @@ build.bat
 
 ## 🗺 EDITOR
 
-```id="b4"
+```
 python editor/aethoria_editor3.py
 ```
 
