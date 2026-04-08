@@ -1,16 +1,16 @@
 <div align="center">
 
-```
- █████╗ ███████╗████████╗██╗  ██╗ ██████╗ ██████╗ ██╗ █████╗
-██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗██║██╔══██╗
-███████║█████╗     ██║   ███████║██║   ██║██████╔╝██║███████║
-██╔══██║██╔══╝     ██║   ██╔══██║██║   ██║██╔══██╗██║██╔══██║
-██║  ██║███████╗   ██║   ██║  ██║╚██████╔╝██║  ██║██║██║  ██║
-╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
-           E T E R N A L   R E A L M S
-```
+<img src="docs/images/logo.png" width="420"/>
 
-**MMORPG Engine (C++17 + SFML) with integrated Python Editor**
+# AETHORIA: Eternal Realms
+
+**Custom MMORPG Engine (C++17 + SFML) with Integrated Python Editor**
+
+<p align="center">
+  <img src="https://img.shields.io/badge/C++-17-blue"/>
+  <img src="https://img.shields.io/badge/SFML-2.6-green"/>
+  <img src="https://img.shields.io/badge/Editor-Python-orange"/>
+</p>
 
 </div>
 
@@ -26,15 +26,15 @@
 
 ## ✨ Обзор
 
-**Aethoria: Eternal Realms** — это полноценный MMORPG-движок, написанный с нуля на C++17 с использованием SFML.
+**Aethoria: Eternal Realms** — это MMORPG-движок, написанный с нуля на C++17 с использованием SFML.
 
-Ключевая идея проекта:
+Проект построен вокруг:
 
-* собственная архитектура
-* data-driven подход (JSON)
-* встроенный инструмент разработки (редактор)
+* собственной архитектуры
+* data-driven подхода (JSON)
+* встроенного редактора
 
-Проект не использует сторонние игровые движки.
+Без Unity и Unreal — полный контроль над системой.
 
 ---
 
@@ -43,36 +43,32 @@
 ### ⚔ Движок
 
 * Реалтайм боевая система
-* AI: Idle → Patrol → Aggro → Combat
-* Тайловая карта
+* AI (Idle → Patrol → Aggro → Combat)
+* Тайловый мир
 * Entity system (NPC, враги, порталы)
-* Система анимаций (spritesheets)
-* Аудио (музыка + SFX)
+* Анимации (spritesheets)
+* Аудио система
 * Scene system
-* Загрузка/сохранение через JSON
+* JSON загрузка/сохранение
 * Визуальные эффекты
 
 ---
 
 ### 🛠 Редактор (Python / Tkinter)
 
-* Редактор карт
+* Редактор карты
 * Размещение NPC и врагов
 * Префабы
 * Квесты и диалоги
-* Конфигурация игры
+* Конфигурация
 * Undo / Redo
-* Прямая синхронизация
+* Автосинхронизация
 
 ---
 
 ## 🎨 Asset Pipeline
 
-Проект использует полностью **JSON-ориентированную систему ассетов**.
-
-### 📦 Структура
-
-```
+```id="aeth1"
 assets/
 ├── animations/
 ├── fonts/
@@ -90,30 +86,15 @@ assets/
 └── ui_config.json
 ```
 
----
-
-### 🗺 Сцены
-
-Сцены задаются через JSON и управляют:
-
-* логикой зоны
-* PvP
-* ограничениями уровня
-* параметрами окружения
-
----
-
-### 🔄 Интеграция
-
-* редактор генерирует JSON
-* движок читает напрямую
-* без промежуточных форматов
+* JSON-ориентированная система
+* разделение данных и логики
+* прямое использование движком
 
 ---
 
 ## 🏗 Архитектура
 
-```
+```id="aeth2"
 ENGINE (C++)
 ├── Scene System
 ├── Entity System
@@ -135,11 +116,13 @@ DATA
 
 ## 📁 Структура проекта
 
-```
+```id="aeth3"
 project_root/
 ├── assets/
 ├── build/
 ├── docs/
+│   └── images/
+│       └── logo.png
 ├── editor/
 ├── saves/
 ├── src/
@@ -159,12 +142,11 @@ project_root/
 ./build.sh
 ```
 
-Что делает скрипт:
+Скрипт:
 
-* проверяет cmake и компилятор
-* проверяет SFML
+* проверяет зависимости
 * собирает проект
-* предлагает сразу запустить игру или редактор
+* предлагает запуск
 
 ---
 
@@ -178,25 +160,22 @@ build.bat
 
 ## ⚙️ Особенности сборки
 
-* CMake автоматически подключает SFML
+* используется CMake
+* автоматически подключается SFML
 * после сборки:
 
-  * копируются **assets/**
-  * копируются **SFML DLL**
+  * копируются `assets/`
+  * копируются зависимости
 
-👉 проект запускается без ручной настройки
+Проект готов к запуску сразу.
 
 ---
 
 ## ▶️ Запуск
 
-После сборки:
-
 ```
 ./build/AETHORIA
 ```
-
-или через build.sh (интерактивно)
 
 ---
 
@@ -214,8 +193,8 @@ python editor/aethoria_editor3.py
 Редактор → JSON → Движок
 ```
 
-* Ctrl+S в редакторе
-* данные сразу доступны игре
+* изменения сохраняются мгновенно
+* движок загружает напрямую
 
 ---
 
@@ -228,6 +207,25 @@ python editor/aethoria_editor3.py
 
 ---
 
+## 📦 Сохранения
+
+```
+saves/
+```
+
+---
+
+## 🚀 Roadmap (кратко)
+
+* Event System
+* Skill Editor
+* Item System
+* Multiplayer
+* Auth + Database
+* Visual Scripting
+
+---
+
 ---
 
 # 🇺🇸 English
@@ -236,11 +234,11 @@ python editor/aethoria_editor3.py
 
 **Aethoria: Eternal Realms** is a custom-built MMORPG engine written in C++17 using SFML.
 
-Core principles:
+Core ideas:
 
 * custom architecture
 * data-driven design (JSON)
-* integrated toolchain (editor)
+* integrated editor
 
 ---
 
@@ -273,7 +271,7 @@ Core principles:
 
 ## 🎨 Assets
 
-```
+```id="aeth4"
 assets/
 ├── animations/
 ├── fonts/
@@ -284,10 +282,6 @@ assets/
 ├── textures/
 └── *.json
 ```
-
-* JSON-based pipeline
-* Sprite animations
-* Scene definitions
 
 ---
 
@@ -325,5 +319,4 @@ python editor/aethoria_editor3.py
 
 ## 📄 License
 
-See LICENSE
-
+See LICENSE file
