@@ -15,7 +15,7 @@ All notable changes to Aethoria: Eternal Realms are documented here.
 
 ---
 
-## [0.4.0] — 2025
+## [0.4.0] — 2026
 
 ### Added
 - **Prefab System** — 60+ built-in entity templates across 5 categories
@@ -40,7 +40,7 @@ All notable changes to Aethoria: Eternal Realms are documented here.
 
 ---
 
-## [0.3.0] — 2025
+## [0.3.0] — 2026
 
 ### Added
 - **Quest Editor** tab with full quest chain support
@@ -57,7 +57,7 @@ All notable changes to Aethoria: Eternal Realms are documented here.
 
 ---
 
-## [0.2.0] — 2025
+## [0.2.0] — 2026
 
 ### Added
 - Full tile map editor with paint, erase, fill, eyedropper tools
@@ -74,7 +74,7 @@ All notable changes to Aethoria: Eternal Realms are documented here.
 
 ---
 
-## [0.1.0] — 2025
+## [0.1.0] — 2026
 
 ### Added
 - Initial project structure
