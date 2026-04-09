@@ -958,6 +958,23 @@ def scrolled_text(parent, height=6, width=40):
     sb.pack(side="right", fill="y"); t.pack(side="left", fill="both", expand=True)
     return fr, t
 
+def entry(parent, textvariable=None, width=20, **kw):
+    return tk.Entry(parent, textvariable=textvariable, width=width,
+                    bg=C["input_bg"], fg=C["text"], insertbackground=C["gold"],
+                    relief="flat", bd=4, font=("Segoe UI", 9), **kw)
+
+def scrolled_listbox(parent, height=10, width=20, selectmode="browse"):
+    fr = tk.Frame(parent, bg=C["panel2"], bd=1, relief="flat")
+    lb = tk.Listbox(fr, height=height, width=width,
+                    bg=C["panel2"], fg=C["text"],
+                    selectbackground=C["accent"], selectforeground="white",
+                    activestyle="none", relief="flat", bd=0,
+                    font=("Segoe UI", 9), selectmode=selectmode)
+    sb = ttk.Scrollbar(fr, orient="vertical", command=lb.yview, style="Dark.Vertical.TScrollbar")
+    lb.configure(yscrollcommand=sb.set)
+    sb.pack(side="right", fill="y"); lb.pack(side="left", fill="both", expand=True)
+    return fr, lb
+
 
 # ══════════════════════════════════════════════════════════════
 # ТАБ 1: КАРТА МИРА
@@ -1139,6 +1156,7 @@ class MapTab:
                        activebackground=C["panel2"], font=("Segoe UI",9)).pack(side="left",padx=4)
         btn(tb,"Город",self._goto_city,padx=6,pady=3).pack(side="left",padx=2)
         btn(tb,"↔ Всё",self._fit_map,padx=6,pady=3).pack(side="left",padx=2)
+        btn(tb,"⤡ Размер карты",self._resize_map,C["panel3"],C["cyan"],padx=6,pady=3).pack(side="left",padx=2)
 
         # Канвас
         cf = tk.Frame(p, bg=C["canvas"]); cf.pack(fill="both", expand=True)
@@ -1499,7 +1517,111 @@ class MapTab:
         if s > 4:
             ccx,ccy = self._tile_to_canvas(CITY_CX, CITY_CY)
             cr = CITY_RADIUS*s
-            self.canvas.create_oval(ccx-cr,ccy-cr,ccx+cr,ccy+cr, outline="#f0c04044", width=1)
+            self.canvas.create_oval(ccx-cr,ccy-cr,ccx+cr,ccy+cr, outline="#f0c040", width=1)
+
+    def _get_tile_texture(self, tile_id, size):
+        """Возвращает PhotoImage текстуры тайла (с кэшем). None если нет текстуры."""
+        if not PILLOW: return None
+        tile_info = TILES.get(tile_id, {})
+        tex_path = tile_info.get("texture", "")
+        if not tex_path: return None
+        cache_key = f"{tile_id}_{int(size)}"
+        if cache_key in self._tile_cache:
+            return self._tile_cache[cache_key]
+        candidates = [Path(tex_path)]
+        if self.project_root:
+            candidates += [
+                self.project_root / "assets" / "textures" / "tiles" / tex_path,
+                self.project_root / "assets" / tex_path,
+                self.project_root / tex_path,
+            ]
+        for p in candidates:
+            if p.exists():
+                try:
+                    img = Image.open(str(p)).convert("RGBA")
+                    sz = max(1, int(size))
+                    img = img.resize((sz, sz), Image.NEAREST)
+                    photo = ImageTk.PhotoImage(img)
+                    self._tile_cache[cache_key] = photo
+                    return photo
+                except Exception as ex:
+                    print(f"[WARN] tile texture {p}: {ex}")
+        self._tile_cache[cache_key] = None
+        return None
+
+    def _resize_map(self):
+        """Диалог изменения размера карты (расширение или уменьшение)."""
+        win = tk.Toplevel(self.frame.winfo_toplevel())
+        win.title("⤡ Изменить размер карты")
+        win.geometry("320x230"); win.configure(bg=C["panel"]); win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="⤡ Изменить размер карты", bg=C["accent"], fg="white",
+                 font=("Segoe UI", 11, "bold"), pady=8).pack(fill="x")
+        tk.Label(win, text=f"Текущий размер: {self.mapdata.width} × {self.mapdata.height}",
+                 bg=C["panel2"], fg=C["gold"], font=("Segoe UI", 9), pady=4).pack(fill="x")
+
+        frm = tk.Frame(win, bg=C["panel"]); frm.pack(fill="x", padx=20, pady=12)
+        frm.columnconfigure(1, weight=1)
+
+        tk.Label(frm, text="Ширина (тайлов):", bg=C["panel"], fg=C["text"],
+                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=4)
+        w_var = tk.IntVar(value=self.mapdata.width)
+        tk.Spinbox(frm, from_=20, to=1000, textvariable=w_var,
+                   bg=C["input_bg"], fg=C["text"], buttonbackground=C["panel3"],
+                   font=("Segoe UI", 9), relief="flat", bd=4, width=8
+                   ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+
+        tk.Label(frm, text="Высота (тайлов):", bg=C["panel"], fg=C["text"],
+                 font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=4)
+        h_var = tk.IntVar(value=self.mapdata.height)
+        tk.Spinbox(frm, from_=20, to=1000, textvariable=h_var,
+                   bg=C["input_bg"], fg=C["text"], buttonbackground=C["panel3"],
+                   font=("Segoe UI", 9), relief="flat", bd=4, width=8
+                   ).grid(row=1, column=1, sticky="ew", padx=(8, 0))
+
+        fill_var = tk.StringVar(value="GRASS")
+        tk.Label(frm, text="Заполнить новые:", bg=C["panel"], fg=C["text"],
+                 font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Combobox(frm, values=list(TILES.keys()), textvariable=fill_var,
+                     state="readonly", style="Dark.TCombobox", font=("Segoe UI", 9), width=10
+                     ).grid(row=2, column=1, sticky="ew", padx=(8, 0))
+
+        def _apply():
+            try:
+                nw = max(20, min(1000, w_var.get()))
+                nh = max(20, min(1000, h_var.get()))
+            except Exception:
+                messagebox.showerror("Ошибка", "Введите корректные числа.", parent=win)
+                return
+            fill = fill_var.get() if fill_var.get() in TILES else "GRASS"
+            self._push_undo()
+            old_tiles = self.mapdata.tiles
+            old_h = self.mapdata.height
+            old_w = self.mapdata.width
+            new_tiles = []
+            for y in range(nh):
+                row = []
+                for x in range(nw):
+                    if y < old_h and x < old_w:
+                        row.append(old_tiles[y][x])
+                    else:
+                        row.append(fill)
+                new_tiles.append(row)
+            self.mapdata.tiles  = new_tiles
+            self.mapdata.width  = nw
+            self.mapdata.height = nh
+            self.modified = True
+            self._tile_cache.clear()
+            self._fit_map()
+            self._update_minimap()
+            self._update_stats()
+            self._update_status(f"⤡ Карта изменена: {nw}×{nh}")
+            win.destroy()
+
+        bf = tk.Frame(win, bg=C["panel2"]); bf.pack(fill="x", side="bottom", pady=6)
+        btn(bf, "✅ Применить", _apply, C["accent"], padx=12, pady=4).pack(side="left", padx=10)
+        btn(bf, "✖ Отмена", win.destroy, padx=12, pady=4).pack(side="right", padx=10)
 
     def _draw_tile(self, tx, ty, batch=False):
         s = TILE * self.zoom
@@ -5813,6 +5935,9 @@ class AethoriaEditor:
         self.locations_tab    = LocationsTab(world_nb, self.project_root, lambda: self.map_tab)
         self.portal_links_tab = PortalLinksTab(world_nb, self.project_root)
         self.prefab_tab       = PrefabSystemTab(world_nb, self.project_root, lambda: self.map_tab)
+        # Редмап Приоритет 3+: редакторы AI и спавна
+        self.ai_editor_tab    = AIEditorTab(world_nb, self.project_root)
+        self.spawn_editor_tab = SpawnEditorTab(world_nb, self.project_root)
 
         # ══════════════════════════════════════════════════════
         # 2. 🎨 АССЕТЫ — Анимации + Тайлсеты
@@ -5833,6 +5958,8 @@ class AethoriaEditor:
         narrative_nb.pack(fill="both", expand=True)
         self.quest_tab = QuestEditorTab(narrative_nb, self.project_root)
         self.dlg_tab   = DialogueEditorTab(narrative_nb, self.project_root)
+        # Редмап Приоритет 1: редактор событий/триггеров
+        self.event_editor_tab = EventEditorTab(narrative_nb, self.project_root)
 
         # ══════════════════════════════════════════════════════
         # 4. 🧙 ПЕРСОНАЖИ — Выбор + Классы + Предметы
@@ -5841,16 +5968,26 @@ class AethoriaEditor:
         self.notebook.add(chars_frame, text="🧙  Персонажи")
         chars_nb = ttk.Notebook(chars_frame, style="Dark.TNotebook")
         chars_nb.pack(fill="both", expand=True)
+
+        # Всегда: выбор персонажа
         self.char_tab = CharacterSelectTab(chars_nb, self.project_root)
+
+        # Всегда: глобальная база скиллов (для движка, не привязана к классам)
+        self.skill_editor_tab = SkillEditorTab(chars_nb, self.project_root)
+
         if MMO_TABS:
+            # Полные MMO-вкладки: классы со скилл-деревьями + предметы + таблицы лута
             self.classes_tab = ClassesTab(chars_nb, self.project_root)
             self.items_tab   = ItemsTab(chars_nb, self.project_root)
+            # ItemEditorTab НЕ добавляем — ItemsTab уже покрывает items.json полностью
         else:
-            # Заглушка если aethoria_mmo_tabs не найден
+            # Заглушки если aethoria_mmo_tabs.py не найден рядом с редактором
             _ph = tk.Frame(chars_nb, bg=C["bg"])
             chars_nb.add(_ph, text="⚔ Классы")
             tk.Label(_ph, text="Установи aethoria_mmo_tabs.py\nрядом с редактором",
-                     bg=C["bg"], fg=C["muted"], font=("Segoe UI",11)).pack(expand=True)
+                     bg=C["bg"], fg=C["muted"], font=("Segoe UI", 11)).pack(expand=True)
+            # Базовый редактор предметов как запасной вариант
+            self.item_editor_tab = ItemEditorTab(chars_nb, self.project_root)
 
         # ══════════════════════════════════════════════════════
         # 5. ⚙ НАСТРОЙКИ — Конфиг + Сервер + Интерфейс
@@ -6083,6 +6220,1096 @@ class AethoriaEditor:
 
     def run(self):
         self.root.mainloop()
+
+
+
+# ══════════════════════════════════════════════════════════════
+# SKILL EDITOR TAB — Редмап Приоритет 2
+# Редактирует assets/skills.json напрямую
+# ══════════════════════════════════════════════════════════════
+class SkillEditorTab:
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = Path(project_root) if project_root else Path(".")
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="⚡ База скиллов")
+        self._skills = []
+        self._sel_idx = -1
+        self._build()
+        self._load()
+
+    def _load(self):
+        p = self.project_root / "assets" / "skills.json"
+        if p.exists():
+            try:
+                self._skills = json.loads(p.read_text("utf-8"))
+            except Exception:
+                self._skills = []
+        if not self._skills:
+            self._skills = self._defaults()
+        self._refresh_list()
+
+    def _save(self):
+        p = self.project_root / "assets" / "skills.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self._skills, ensure_ascii=False, indent=2), "utf-8")
+        messagebox.showinfo("Скиллы", f"Сохранено {len(self._skills)} скиллов")
+
+    def _defaults(self):
+        return [
+            {"id":"slash",    "name":"Разящий удар", "icon":"⚔",  "type":"active",
+             "target":"single","mana":10,"cooldown":2.0,"range":80,"aoe_radius":0,
+             "damage_formula":"STR*2.5+50","description":"Мощный удар.","effects":[]},
+            {"id":"fireball", "name":"Огненный шар", "icon":"🔥", "type":"active",
+             "target":"aoe",  "mana":20,"cooldown":1.5,"range":200,"aoe_radius":80,
+             "damage_formula":"INT*3.5+80","description":"AoE взрыв.","effects":[]},
+            {"id":"heal",     "name":"Лечение",       "icon":"💚", "type":"active",
+             "target":"self", "mana":15,"cooldown":8.0,"range":0,"aoe_radius":0,
+             "damage_formula":"INT*2+VIT*3","description":"Восстанавливает HP.","effects":[]},
+            {"id":"dash",     "name":"Рывок",         "icon":"💨", "type":"active",
+             "target":"self", "mana":10,"cooldown":6.0,"range":0,"aoe_radius":0,
+             "damage_formula":"0","description":"Рывок вперёд.","effects":[]},
+        ]
+
+    def _build(self):
+        paned = tk.PanedWindow(self.frame, orient="horizontal", bg=C["bg"], sashwidth=4)
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Левая — список
+        left = tk.Frame(paned, bg=C["panel"], width=220)
+        paned.add(left, minsize=180)
+        tk.Label(left, text="⚡ База скиллов", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=6).pack()
+        tk.Label(left, text="Глобальный пул скиллов\n(skills.json для движка)",
+                 bg=C["panel"], fg=C["muted"], font=("Segoe UI",7), pady=0).pack()
+        fr, self._lb = scrolled_listbox(left, height=24, width=22)
+        fr.pack(fill="both", expand=True, padx=4)
+        self._lb.bind("<<ListboxSelect>>", self._on_select)
+        btn_row = tk.Frame(left, bg=C["panel"]); btn_row.pack(fill="x", padx=4, pady=4)
+        btn(btn_row, "➕", self._add, C["green"],"black", width=3).pack(side="left")
+        btn(btn_row, "🗑", self._del, C["red"],  "white", width=3).pack(side="left", padx=2)
+        btn(btn_row, "💾 Сохранить", self._save, C["accent"],"white").pack(side="right")
+
+        # Правая — форма
+        right = tk.Frame(paned, bg=C["panel"])
+        paned.add(right, minsize=300)
+        self._form = tk.Frame(right, bg=C["panel"])
+        self._form.pack(fill="both", expand=True, padx=8, pady=8)
+        self._vars = {}
+        fields = [
+            ("id",             "ID",           "str"),
+            ("name",           "Название",     "str"),
+            ("icon",           "Иконка",       "str"),
+            ("type",           "Тип (active/passive)", "str"),
+            ("target",         "Цель (single/aoe/self)", "str"),
+            ("mana",           "Стоимость маны",   "int"),
+            ("cooldown",       "Кулдаун (сек)",    "float"),
+            ("range",          "Дальность",        "float"),
+            ("aoe_radius",     "AoE радиус",       "float"),
+            ("damage_formula", "Формула урона",    "str"),
+            ("description",    "Описание",         "str"),
+        ]
+        for key, label, _ in fields:
+            row = tk.Frame(self._form, bg=C["panel"]); row.pack(fill="x", pady=2)
+            tk.Label(row, text=label+":", bg=C["panel"], fg=C["text"],
+                     font=("Segoe UI",9), width=24, anchor="w").pack(side="left")
+            v = tk.StringVar()
+            self._vars[key] = v
+            e = entry(row, textvariable=v, width=28)
+            e.pack(side="left")
+        btn(self._form, "✅ Применить", self._apply, C["green"],"black",
+            padx=10, pady=4).pack(anchor="w", pady=8)
+
+    def _refresh_list(self):
+        self._lb.delete(0, "end")
+        for s in self._skills:
+            self._lb.insert("end", f"{s.get('icon','?')} {s.get('name','?')}")
+
+    def _on_select(self, ev=None):
+        sel = self._lb.curselection()
+        if not sel: return
+        self._sel_idx = sel[0]
+        s = self._skills[self._sel_idx]
+        for key, var in self._vars.items():
+            var.set(str(s.get(key, "")))
+
+    def _apply(self):
+        if self._sel_idx < 0 or self._sel_idx >= len(self._skills): return
+        s = self._skills[self._sel_idx]
+        for key, var in self._vars.items():
+            raw = var.get()
+            if key in ("mana",):
+                try: s[key] = int(raw)
+                except: pass
+            elif key in ("cooldown","range","aoe_radius"):
+                try: s[key] = float(raw)
+                except: pass
+            else:
+                s[key] = raw
+        self._refresh_list()
+        self._lb.selection_set(self._sel_idx)
+
+    def _add(self):
+        new = {"id":f"skill_{len(self._skills)}","name":"Новый скилл","icon":"✨",
+               "type":"active","target":"single","mana":10,"cooldown":1.0,
+               "range":80,"aoe_radius":0,"damage_formula":"STR*2","description":"","effects":[]}
+        self._skills.append(new)
+        self._refresh_list()
+        self._lb.selection_set(len(self._skills)-1)
+        self._on_select()
+
+    def _del(self):
+        if self._sel_idx < 0: return
+        if messagebox.askyesno("Удалить?", "Удалить выбранный скилл?"):
+            self._skills.pop(self._sel_idx)
+            self._sel_idx = -1
+            self._refresh_list()
+
+
+# ══════════════════════════════════════════════════════════════
+# ITEM EDITOR TAB — Редмап Приоритет 2
+# Редактирует assets/items.json
+# ══════════════════════════════════════════════════════════════
+class ItemEditorTab:
+    RARITIES = ["Обычный","Необычный","Редкий","Эпический","Легендарный"]
+    TYPES     = ["weapon","armor","helmet","boots","ring","amulet","consumable","quest","material"]
+    SLOTS     = ["main_hand","off_hand","head","chest","legs","feet","neck","ring1","ring2","none"]
+
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = Path(project_root) if project_root else Path(".")
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🎒 Предметы")
+        self._items = []
+        self._sel_idx = -1
+        self._build()
+        self._load()
+
+    def _load(self):
+        p = self.project_root / "assets" / "items.json"
+        if p.exists():
+            try: self._items = json.loads(p.read_text("utf-8"))
+            except: self._items = []
+        if not self._items:
+            self._items = self._defaults()
+        self._refresh_list()
+
+    def _save(self):
+        p = self.project_root / "assets" / "items.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self._items, ensure_ascii=False, indent=2), "utf-8")
+        messagebox.showinfo("Предметы", f"Сохранено {len(self._items)} предметов")
+
+    def _defaults(self):
+        return [
+            {"id":"iron_sword",    "name":"Железный меч",   "icon":"⚔",  "type":"weapon",
+             "slot":"main_hand","rarity":0,"stack":1,"value":50,"description":"Обычный меч.",
+             "stats":{"damage":15}},
+            {"id":"leather_armor", "name":"Кожаная броня",  "icon":"🛡",  "type":"armor",
+             "slot":"chest",    "rarity":0,"stack":1,"value":40,"description":"Лёгкая броня.",
+             "stats":{"defense":10}},
+            {"id":"health_potion", "name":"Зелье здоровья", "icon":"🧪", "type":"consumable",
+             "slot":"none",     "rarity":0,"stack":20,"value":20,"description":"Восст. 100 HP.",
+             "stats":{"hp_restore":100}},
+            {"id":"goblin_tooth",  "name":"Зуб гоблина",    "icon":"🦷",  "type":"material",
+             "slot":"none",     "rarity":0,"stack":99,"value":5, "description":"Квестовый материал.",
+             "stats":{}},
+        ]
+
+    def _build(self):
+        paned = tk.PanedWindow(self.frame, orient="horizontal", bg=C["bg"], sashwidth=4)
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Список
+        left = tk.Frame(paned, bg=C["panel"], width=240)
+        paned.add(left, minsize=200)
+        tk.Label(left, text="🎒 Предметы", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=6).pack()
+        # Фильтр по типу
+        flt = tk.Frame(left, bg=C["panel"]); flt.pack(fill="x", padx=4)
+        tk.Label(flt, text="Тип:", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI",8)).pack(side="left")
+        self._filter_var = tk.StringVar(value="все")
+        flt_vals = ["все"] + self.TYPES
+        ttk.Combobox(flt, values=flt_vals, textvariable=self._filter_var,
+                     state="readonly", width=14).pack(side="left", padx=2)
+        self._filter_var.trace_add("write", lambda *a: self._refresh_list())
+        fr, self._lb = scrolled_listbox(left, height=22, width=24)
+        fr.pack(fill="both", expand=True, padx=4)
+        self._lb.bind("<<ListboxSelect>>", self._on_select)
+        btn_row = tk.Frame(left, bg=C["panel"]); btn_row.pack(fill="x", padx=4, pady=4)
+        btn(btn_row, "➕", self._add, C["green"],"black", width=3).pack(side="left")
+        btn(btn_row, "🗑", self._del, C["red"],  "white", width=3).pack(side="left", padx=2)
+        btn(btn_row, "💾 Сохранить", self._save, C["accent"],"white").pack(side="right")
+
+        # Форма
+        right_outer = tk.Frame(paned, bg=C["panel"])
+        paned.add(right_outer, minsize=340)
+        canvas = tk.Canvas(right_outer, bg=C["panel"], highlightthickness=0)
+        vsb = tk.Scrollbar(right_outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y"); canvas.pack(fill="both", expand=True)
+        right = tk.Frame(canvas, bg=C["panel"])
+        canvas.create_window((0,0), window=right, anchor="nw")
+        right.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        self._vars = {}
+        base_fields = [
+            ("id",          "ID",                "str"),
+            ("name",        "Название",          "str"),
+            ("icon",        "Иконка",            "str"),
+            ("description", "Описание",          "str"),
+            ("value",       "Цена (золото)",     "int"),
+            ("stack",       "Макс. стак",        "int"),
+        ]
+        tk.Label(right, text="Основное", bg=C["panel"], fg=C["gold2"],
+                 font=("Segoe UI",9,"bold"), pady=4).pack(anchor="w", padx=8)
+        for key, label, _ in base_fields:
+            row = tk.Frame(right, bg=C["panel"]); row.pack(fill="x", padx=8, pady=2)
+            tk.Label(row, text=label+":", bg=C["panel"], fg=C["text"],
+                     font=("Segoe UI",9), width=22, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._vars[key] = v
+            entry(row, textvariable=v, width=22).pack(side="left")
+
+        # Тип / слот / редкость через Combobox
+        for key, label, vals in [
+            ("type",   "Тип предмета",  self.TYPES),
+            ("slot",   "Слот",          self.SLOTS),
+            ("rarity", "Редкость",      [f"{i}: {r}" for i,r in enumerate(self.RARITIES)]),
+        ]:
+            row = tk.Frame(right, bg=C["panel"]); row.pack(fill="x", padx=8, pady=2)
+            tk.Label(row, text=label+":", bg=C["panel"], fg=C["text"],
+                     font=("Segoe UI",9), width=22, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._vars[key] = v
+            ttk.Combobox(row, values=vals, textvariable=v, state="readonly", width=20).pack(side="left")
+
+        # Статы
+        tk.Label(right, text="Статы (key=value, по одному в строке)",
+                 bg=C["panel"], fg=C["gold2"],
+                 font=("Segoe UI",9,"bold"), pady=4).pack(anchor="w", padx=8)
+        self._stats_text = tk.Text(right, bg=C["input_bg"], fg=C["text"],
+                                   font=("Consolas",9), height=8, width=32,
+                                   insertbackground=C["text"], relief="flat")
+        self._stats_text.pack(padx=8, pady=2, fill="x")
+        tk.Label(right, text="Пример:\ndamage=15\ndefense=5\ncrit_chance=0.05",
+                 bg=C["panel"], fg=C["muted"], font=("Segoe UI",8)).pack(anchor="w", padx=8)
+        btn(right, "✅ Применить", self._apply, C["green"],"black",
+            padx=10, pady=4).pack(anchor="w", padx=8, pady=8)
+
+    def _refresh_list(self):
+        flt = self._filter_var.get() if hasattr(self,"_filter_var") else "все"
+        self._lb.delete(0,"end")
+        self._filtered = []
+        for i,item in enumerate(self._items):
+            if flt != "все" and item.get("type","") != flt:
+                continue
+            self._filtered.append(i)
+            rarity_colors = ["","(U)","(R)","(E)","(L)"]
+            r = item.get("rarity", 0)
+            try: r = int(r)
+            except (ValueError, TypeError): r = 0
+            tag = rarity_colors[r] if 0 <= r < len(rarity_colors) else ""
+            self._lb.insert("end", f"{item.get('icon','?')} {item.get('name','?')} {tag}")
+
+    def _on_select(self, ev=None):
+        sel = self._lb.curselection()
+        if not sel: return
+        fi = sel[0]
+        if fi >= len(self._filtered): return
+        self._sel_idx = self._filtered[fi]
+        item = self._items[self._sel_idx]
+        for key, var in self._vars.items():
+            if key == "rarity":
+                r = item.get("rarity",0)
+                var.set(f"{r}: {self.RARITIES[r] if r<len(self.RARITIES) else '?'}")
+            else:
+                var.set(str(item.get(key,"")))
+        # stats
+        self._stats_text.delete("1.0","end")
+        stats = item.get("stats",{})
+        for k,v in stats.items():
+            self._stats_text.insert("end", f"{k}={v}\n")
+
+    def _apply(self):
+        if self._sel_idx < 0 or self._sel_idx >= len(self._items): return
+        item = self._items[self._sel_idx]
+        for key, var in self._vars.items():
+            raw = var.get()
+            if key == "rarity":
+                try: item[key] = int(raw.split(":")[0])
+                except: pass
+            elif key in ("value","stack"):
+                try: item[key] = int(raw)
+                except: pass
+            else:
+                item[key] = raw
+        # Парсим stats из текстового поля
+        stats = {}
+        for line in self._stats_text.get("1.0","end").strip().splitlines():
+            if "=" in line:
+                k,_,v = line.partition("=")
+                k = k.strip(); v = v.strip()
+                try: stats[k] = float(v) if "." in v else int(v)
+                except: stats[k] = v
+        item["stats"] = stats
+        self._refresh_list()
+
+    def _add(self):
+        new = {"id":f"item_{len(self._items)}","name":"Новый предмет","icon":"📦",
+               "type":"material","slot":"none","rarity":0,"stack":1,
+               "value":1,"description":"","stats":{}}
+        self._items.append(new)
+        self._refresh_list()
+        self._lb.selection_set(len(self._filtered)-1)
+        self._on_select()
+
+    def _del(self):
+        if self._sel_idx < 0: return
+        if messagebox.askyesno("Удалить?", "Удалить выбранный предмет?"):
+            self._items.pop(self._sel_idx)
+            self._sel_idx = -1
+            self._refresh_list()
+
+
+
+# ══════════════════════════════════════════════════════════════
+# EVENT EDITOR TAB — Редмап Приоритет 1
+# Визуальный редактор triggers.json:
+#   каждый триггер = зона + событие + действие + условие
+# ══════════════════════════════════════════════════════════════
+class EventEditorTab:
+    EVENTS  = ["enter","leave","interact","timer","condition"]
+    ACTIONS = ["scene_switch","scene_instance","dialogue","sound","particles","custom","none"]
+    SHAPES  = ["circle","rect"]
+
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = Path(project_root) if project_root else Path(".")
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🔔 События")
+        self._triggers = []
+        self._sel = -1
+        self._build()
+        self._load()
+
+    # ── I/O ────────────────────────────────────────────────
+    def _load(self):
+        p = self.project_root / "assets" / "triggers.json"
+        if p.exists():
+            try:
+                data = json.loads(p.read_text("utf-8"))
+                self._triggers = data.get("triggers", [])
+            except Exception:
+                self._triggers = []
+        if not self._triggers:
+            self._triggers = self._defaults()
+        self._refresh_list()
+
+    def _save(self):
+        self._apply_form()
+        p = self.project_root / "assets" / "triggers.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Читаем существующий файл чтобы сохранить server_scenes
+        existing = {}
+        if p.exists():
+            try: existing = json.loads(p.read_text("utf-8"))
+            except: pass
+        existing["triggers"] = self._triggers
+        p.write_text(json.dumps(existing, ensure_ascii=False, indent=2), "utf-8")
+        messagebox.showinfo("События", f"Сохранено {len(self._triggers)} триггеров → {p}")
+
+    def _defaults(self):
+        return [
+            {"id":"portal_city_enter","name":"Портал → Лес","active":True,"one_shot":False,
+             "shape":"circle","x":1920,"y":1920,"radius":48,"w":64,"h":64,
+             "event":"enter","timer_duration":3.0,
+             "action":"scene_switch","target_scene":"dark_forest",
+             "spawn_offset_x":10,"spawn_offset_y":10,
+             "dialogue":"","sound":"","level_req":0,
+             "blocked_msg":"Слишком опасно!","custom_tag":""},
+            {"id":"guard_dialogue","name":"Стражник — привет","active":True,"one_shot":False,
+             "shape":"circle","x":2000,"y":1800,"radius":64,"w":64,"h":64,
+             "event":"interact","timer_duration":3.0,
+             "action":"dialogue","target_scene":"",
+             "spawn_offset_x":0,"spawn_offset_y":0,
+             "dialogue":"Добро пожаловать в Эторию, путник!",
+             "sound":"","level_req":0,"blocked_msg":"","custom_tag":""},
+        ]
+
+    # ── UI ──────────────────────────────────────────────────
+    def _build(self):
+        paned = tk.PanedWindow(self.frame, orient="horizontal", bg=C["bg"], sashwidth=4)
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Левая панель: список
+        left = tk.Frame(paned, bg=C["panel"], width=240)
+        paned.add(left, minsize=200)
+
+        tk.Label(left, text="🔔 Триггеры/События", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=6).pack()
+
+        search_row = tk.Frame(left, bg=C["panel"]); search_row.pack(fill="x", padx=4)
+        tk.Label(search_row, text="🔍", bg=C["panel"], fg=C["muted"]).pack(side="left")
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *a: self._refresh_list())
+        entry(search_row, textvariable=self._search_var, width=18).pack(side="left", padx=2)
+
+        fr, self._lb = scrolled_listbox(left, height=22, width=26)
+        fr.pack(fill="both", expand=True, padx=4)
+        self._lb.bind("<<ListboxSelect>>", self._on_select)
+
+        btn_row = tk.Frame(left, bg=C["panel"]); btn_row.pack(fill="x", padx=4, pady=4)
+        btn(btn_row, "➕", self._add,  C["green"],"black",width=3).pack(side="left")
+        btn(btn_row, "⧉",  self._dup,  C["blue"], "white",width=3).pack(side="left",padx=2)
+        btn(btn_row, "🗑", self._del,  C["red"],  "white",width=3).pack(side="left",padx=2)
+        btn(btn_row, "💾", self._save, C["accent"],"white").pack(side="right")
+
+        # Правая панель: форма
+        right_outer = tk.Frame(paned, bg=C["panel"])
+        paned.add(right_outer, minsize=380)
+        canvas = tk.Canvas(right_outer, bg=C["panel"], highlightthickness=0)
+        vsb = tk.Scrollbar(right_outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y"); canvas.pack(fill="both", expand=True)
+        right = tk.Frame(canvas, bg=C["panel"])
+        canvas.create_window((0,0), window=right, anchor="nw")
+        right.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        self._vars = {}
+
+        def section(title):
+            tk.Label(right, text=title, bg=C["panel"], fg=C["gold2"],
+                     font=("Segoe UI",9,"bold"), pady=5).pack(anchor="w", padx=8)
+            tk.Frame(right, bg=C["border"], height=1).pack(fill="x", padx=8)
+
+        def field(key, label, choices=None, is_bool=False, is_int=False, is_float=False):
+            row = tk.Frame(right, bg=C["panel"]); row.pack(fill="x", padx=8, pady=2)
+            tk.Label(row, text=label+":", bg=C["panel"], fg=C["text"],
+                     font=("Segoe UI",9), width=24, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._vars[key] = (v, is_bool, is_int, is_float)
+            if is_bool:
+                tk.Checkbutton(row, variable=v, onvalue="True", offvalue="False",
+                               bg=C["panel"], fg=C["text"], selectcolor=C["accent"],
+                               activebackground=C["panel"]).pack(side="left")
+            elif choices:
+                ttk.Combobox(row, values=choices, textvariable=v,
+                             state="readonly", width=22).pack(side="left")
+            else:
+                entry(row, textvariable=v, width=24).pack(side="left")
+
+        section("🆔 Идентификация")
+        field("id",       "ID триггера")
+        field("name",     "Отображаемое имя")
+        field("active",   "Активен",          is_bool=True)
+        field("one_shot", "Один раз (oneShot)", is_bool=True)
+
+        section("📍 Зона")
+        field("shape",  "Форма зоны",   choices=self.SHAPES)
+        field("x",      "Центр X",      is_float=True)
+        field("y",      "Центр Y",      is_float=True)
+        field("radius", "Радиус (circle)", is_float=True)
+        field("w",      "Ширина (rect)",   is_float=True)
+        field("h",      "Высота (rect)",   is_float=True)
+
+        section("⚡ Событие")
+        field("event",          "Тип события",       choices=self.EVENTS)
+        field("timer_duration", "Таймер (сек)",       is_float=True)
+
+        section("🎬 Действие")
+        field("action",         "Действие",          choices=self.ACTIONS)
+        field("target_scene",   "Целевая сцена")
+        field("spawn_offset_x", "Spawn X (тайлы)",   is_float=True)
+        field("spawn_offset_y", "Spawn Y (тайлы)",   is_float=True)
+        field("dialogue",       "Текст диалога")
+        field("sound",          "Звук (имя)")
+        field("custom_tag",     "Custom tag")
+
+        section("🔒 Условие (уровень)")
+        field("level_req",   "Мин. уровень",  is_int=True)
+        field("blocked_msg", "Сообщение блока")
+
+        btn(right, "✅ Применить изменения", self._apply_form,
+            C["green"],"black", padx=12, pady=5).pack(anchor="w", padx=8, pady=10)
+
+        # Превью JSON
+        section("📄 JSON Preview")
+        self._preview = tk.Text(right, bg=C["canvas"], fg=C["cyan"],
+                                font=("Consolas",8), height=8, relief="flat",
+                                state="disabled")
+        self._preview.pack(fill="x", padx=8, pady=4)
+
+    # ── Логика ──────────────────────────────────────────────
+    def _refresh_list(self):
+        q = self._search_var.get().lower() if hasattr(self,"_search_var") else ""
+        self._lb.delete(0,"end")
+        self._filtered = []
+        icons = {"enter":"→","leave":"←","interact":"E","timer":"⏱","condition":"?"}
+        for i, t in enumerate(self._triggers):
+            txt = f"{t.get('name',t.get('id','?'))}"
+            if q and q not in txt.lower() and q not in t.get("id","").lower():
+                continue
+            self._filtered.append(i)
+            ev_icon = icons.get(t.get("event","enter"),"?")
+            active  = "✅" if t.get("active",True) else "⬜"
+            self._lb.insert("end", f"{active} [{ev_icon}] {txt}")
+
+    def _on_select(self, ev=None):
+        sel = self._lb.curselection()
+        if not sel: return
+        fi = sel[0]
+        if fi >= len(self._filtered): return
+        self._sel = self._filtered[fi]
+        t = self._triggers[self._sel]
+        for key, (var, is_bool, is_int, is_float) in self._vars.items():
+            val = t.get(key, "")
+            if is_bool:
+                var.set("True" if val else "False")
+            else:
+                var.set(str(val))
+        self._update_preview(t)
+
+    def _apply_form(self):
+        if self._sel < 0 or self._sel >= len(self._triggers): return
+        t = self._triggers[self._sel]
+        for key, (var, is_bool, is_int, is_float) in self._vars.items():
+            raw = var.get()
+            if is_bool:
+                t[key] = (raw == "True")
+            elif is_int:
+                try: t[key] = int(raw)
+                except: pass
+            elif is_float:
+                try: t[key] = float(raw)
+                except: pass
+            else:
+                t[key] = raw
+        self._refresh_list()
+        self._update_preview(t)
+
+    def _update_preview(self, t):
+        self._preview.config(state="normal")
+        self._preview.delete("1.0","end")
+        self._preview.insert("end", json.dumps(t, ensure_ascii=False, indent=2))
+        self._preview.config(state="disabled")
+
+    def _add(self):
+        new = {"id":f"trigger_{len(self._triggers)}","name":"Новый триггер",
+               "active":True,"one_shot":False,"shape":"circle",
+               "x":1920,"y":1920,"radius":48,"w":64,"h":64,
+               "event":"enter","timer_duration":3.0,
+               "action":"dialogue","target_scene":"",
+               "spawn_offset_x":0,"spawn_offset_y":0,
+               "dialogue":"Текст...","sound":"","level_req":0,
+               "blocked_msg":"","custom_tag":""}
+        self._triggers.append(new)
+        self._refresh_list()
+        self._lb.selection_set(len(self._filtered)-1)
+        self._on_select()
+
+    def _dup(self):
+        if self._sel < 0: return
+        import copy
+        new = copy.deepcopy(self._triggers[self._sel])
+        new["id"] = new["id"] + "_copy"
+        new["name"] = new["name"] + " (копия)"
+        self._triggers.append(new)
+        self._refresh_list()
+
+    def _del(self):
+        if self._sel < 0: return
+        if messagebox.askyesno("Удалить?","Удалить выбранный триггер?"):
+            self._triggers.pop(self._sel)
+            self._sel = -1
+            self._refresh_list()
+
+
+# ══════════════════════════════════════════════════════════════
+# AI EDITOR TAB — Редмап Приоритет 3
+# Визуальный редактор AI-параметров врагов.
+# Сохраняет assets/ai_profiles.json
+# ══════════════════════════════════════════════════════════════
+class AIEditorTab:
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = Path(project_root) if project_root else Path(".")
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🤖 AI")
+        self._profiles = []
+        self._sel = -1
+        self._build()
+        self._load()
+
+    def _load(self):
+        p = self.project_root / "assets" / "ai_profiles.json"
+        if p.exists():
+            try: self._profiles = json.loads(p.read_text("utf-8"))
+            except: self._profiles = []
+        if not self._profiles:
+            self._profiles = self._defaults()
+        self._refresh_list()
+
+    def _save(self):
+        self._apply_form()
+        p = self.project_root / "assets" / "ai_profiles.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self._profiles, ensure_ascii=False, indent=2), "utf-8")
+        messagebox.showinfo("AI", f"Сохранено {len(self._profiles)} профилей → {p}")
+
+    def _defaults(self):
+        return [
+            {"id":"goblin",   "name":"Гоблин",   "aggro_range":200,"deaggro_range":450,
+             "combat_range":40,"patrol_speed":60,"aggro_speed":100,"combat_speed":80,
+             "attack_cooldown":1.5,"can_patrol":True,"is_boss":False,
+             "flee_at_low_hp":False,"flee_hp_threshold":0.15},
+            {"id":"troll",    "name":"Тролль",   "aggro_range":160,"deaggro_range":380,
+             "combat_range":55,"patrol_speed":40,"aggro_speed":70,"combat_speed":60,
+             "attack_cooldown":2.5,"can_patrol":True,"is_boss":False,
+             "flee_at_low_hp":False,"flee_hp_threshold":0.10},
+            {"id":"wolf",     "name":"Волк",     "aggro_range":280,"deaggro_range":500,
+             "combat_range":35,"patrol_speed":90,"aggro_speed":160,"combat_speed":140,
+             "attack_cooldown":0.8,"can_patrol":True,"is_boss":False,
+             "flee_at_low_hp":True,"flee_hp_threshold":0.20},
+            {"id":"boss_goblin_king","name":"Король гоблинов","aggro_range":300,
+             "deaggro_range":9999,"combat_range":70,"patrol_speed":50,
+             "aggro_speed":120,"combat_speed":100,"attack_cooldown":1.0,
+             "can_patrol":False,"is_boss":True,
+             "flee_at_low_hp":False,"flee_hp_threshold":0.0},
+        ]
+
+    def _build(self):
+        paned = tk.PanedWindow(self.frame, orient="horizontal", bg=C["bg"], sashwidth=4)
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Список
+        left = tk.Frame(paned, bg=C["panel"], width=220)
+        paned.add(left, minsize=180)
+        tk.Label(left, text="🤖 AI Профили", bg=C["panel"], fg=C["gold"],
+                 font=("Segoe UI",10,"bold"), pady=6).pack()
+        fr, self._lb = scrolled_listbox(left, height=22, width=22)
+        fr.pack(fill="both", expand=True, padx=4)
+        self._lb.bind("<<ListboxSelect>>", self._on_select)
+        btn_row = tk.Frame(left, bg=C["panel"]); btn_row.pack(fill="x", padx=4, pady=4)
+        btn(btn_row,"➕",self._add, C["green"],"black",width=3).pack(side="left")
+        btn(btn_row,"🗑",self._del, C["red"],  "white",width=3).pack(side="left",padx=2)
+        btn(btn_row,"💾",self._save,C["accent"],"white").pack(side="right")
+
+        # Форма
+        right = tk.Frame(paned, bg=C["panel"])
+        paned.add(right, minsize=360)
+
+        self._vars = {}
+
+        def section(title, color=None):
+            tk.Label(right, text=title, bg=C["panel"],
+                     fg=color or C["gold2"],
+                     font=("Segoe UI",9,"bold"), pady=5).pack(anchor="w", padx=8)
+            tk.Frame(right, bg=C["border"], height=1).pack(fill="x", padx=8)
+
+        def field(key, label, is_bool=False, is_float=False, lo=0, hi=9999):
+            row = tk.Frame(right, bg=C["panel"]); row.pack(fill="x", padx=8, pady=2)
+            tk.Label(row, text=label+":", bg=C["panel"], fg=C["text"],
+                     font=("Segoe UI",9), width=28, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._vars[key] = (v, is_bool, is_float)
+            if is_bool:
+                tk.Checkbutton(row, variable=v, onvalue="True", offvalue="False",
+                               bg=C["panel"], fg=C["text"], selectcolor=C["accent"],
+                               activebackground=C["panel"]).pack(side="left")
+            elif is_float:
+                tk.Spinbox(row, textvariable=v, from_=lo, to=hi,
+                           increment=0.05, format="%.2f",
+                           bg=C["input_bg"], fg=C["text"],
+                           font=("Segoe UI",9), relief="flat", width=10).pack(side="left")
+            else:
+                entry(row, textvariable=v, width=20).pack(side="left")
+
+        section("🆔 Профиль")
+        field("id",   "ID профиля")
+        field("name", "Название")
+        field("is_boss","Босс", is_bool=True)
+
+        section("👁 Дальность обнаружения")
+        field("aggro_range",   "Aggro (пикс)",    is_float=True, lo=0, hi=2000)
+        field("deaggro_range", "Деаггро (пикс)",  is_float=True, lo=0, hi=9999)
+        field("combat_range",  "Бой (пикс)",      is_float=True, lo=0, hi=500)
+
+        section("🚶 Скорость")
+        field("patrol_speed", "Патруль (пикс/с)",  is_float=True, lo=0, hi=500)
+        field("aggro_speed",  "Агрессия (пикс/с)", is_float=True, lo=0, hi=500)
+        field("combat_speed", "В бою (пикс/с)",    is_float=True, lo=0, hi=500)
+
+        section("⚔ Бой")
+        field("attack_cooldown", "Кулдаун атаки (сек)", is_float=True, lo=0.1, hi=30)
+        field("can_patrol",      "Патрулирует",         is_bool=True)
+
+        section("💀 Побег")
+        field("flee_at_low_hp",     "Бежать при мало HP", is_bool=True)
+        field("flee_hp_threshold",  "Порог HP (0–1)",      is_float=True, lo=0, hi=1)
+
+        btn(right,"✅ Применить",self._apply_form,C["green"],"black",
+            padx=12,pady=5).pack(anchor="w",padx=8,pady=10)
+
+        # FSM схема (статичная ASCII)
+        section("📊 FSM диаграмма", C["cyan"])
+        fsm_text = (
+            "  IDLE ──▶ PATROL ──(враг замечен)──▶ AGGRO\n"
+            "    ▲          ▲                          │\n"
+            "    │          │              (в радиусе) ▼\n"
+            "  (возврат)    │                       COMBAT\n"
+            "    ▲          │                          │\n"
+            "    │       RETURN ◀──(деаггро)───────────┘\n"
+            "    └──────────┘"
+        )
+        tk.Label(right, text=fsm_text, bg=C["canvas"], fg=C["cyan"],
+                 font=("Consolas",9), justify="left",
+                 padx=8, pady=6).pack(fill="x", padx=8, pady=4)
+
+    def _refresh_list(self):
+        self._lb.delete(0,"end")
+        for p in self._profiles:
+            boss = " 👑" if p.get("is_boss") else ""
+            self._lb.insert("end", f"{p.get('name',p.get('id','?'))}{boss}")
+
+    def _on_select(self, ev=None):
+        sel = self._lb.curselection()
+        if not sel: return
+        self._sel = sel[0]
+        if self._sel >= len(self._profiles): return
+        p = self._profiles[self._sel]
+        for key, (var, is_bool, is_float) in self._vars.items():
+            val = p.get(key,"")
+            if is_bool:
+                var.set("True" if val else "False")
+            elif is_float:
+                var.set(f"{float(val):.2f}" if val != "" else "0.00")
+            else:
+                var.set(str(val))
+
+    def _apply_form(self):
+        if self._sel < 0 or self._sel >= len(self._profiles): return
+        p = self._profiles[self._sel]
+        for key, (var, is_bool, is_float) in self._vars.items():
+            raw = var.get()
+            if is_bool:
+                p[key] = (raw == "True")
+            elif is_float:
+                try: p[key] = float(raw)
+                except: pass
+            else:
+                p[key] = raw
+        self._refresh_list()
+
+    def _add(self):
+        new = {"id":f"mob_{len(self._profiles)}","name":"Новый моб",
+               "aggro_range":200,"deaggro_range":450,"combat_range":40,
+               "patrol_speed":60,"aggro_speed":100,"combat_speed":80,
+               "attack_cooldown":1.5,"can_patrol":True,"is_boss":False,
+               "flee_at_low_hp":False,"flee_hp_threshold":0.15}
+        self._profiles.append(new)
+        self._refresh_list()
+        self._lb.selection_set(len(self._profiles)-1)
+        self._on_select()
+
+    def _del(self):
+        if self._sel < 0: return
+        if messagebox.askyesno("Удалить?","Удалить профиль?"):
+            self._profiles.pop(self._sel)
+            self._sel = -1
+            self._refresh_list()
+
+
+# ══════════════════════════════════════════════════════════════
+# SPAWN EDITOR TAB — Редмап Приоритет 4 (multiplayer sync)
+# Редактирует spawn_config.json:
+#   волны врагов, точки спавна, интервалы
+# ══════════════════════════════════════════════════════════════
+class SpawnEditorTab:
+    ENEMY_TYPES = ["GOBLIN","TROLL","BANDIT","WOLF","SKELETON",
+                   "GOBLIN_KING","FOREST_SPIRIT","DARK_KNIGHT"]
+
+    def __init__(self, notebook, project_root: Path):
+        self.project_root = Path(project_root) if project_root else Path(".")
+        self.frame = tk.Frame(notebook, bg=C["bg"])
+        notebook.add(self.frame, text="🌊 Спавн")
+        self._config = {"zones": [], "global": {"max_enemies":50,"respawn_delay":30}}
+        self._sel_zone = -1
+        self._sel_wave = -1
+        self._build()
+        self._load()
+
+    def _load(self):
+        p = self.project_root / "assets" / "spawn_config.json"
+        if p.exists():
+            try: self._config = json.loads(p.read_text("utf-8"))
+            except: pass
+        if not self._config.get("zones"):
+            self._config["zones"] = self._defaults()
+        self._refresh_zones()
+
+    def _save(self):
+        p = self.project_root / "assets" / "spawn_config.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self._config, ensure_ascii=False, indent=2), "utf-8")
+        messagebox.showinfo("Спавн", f"Сохранено → {p}")
+
+    def _defaults(self):
+        return [
+            {"id":"dark_forest","name":"Тёмный лес","scene":"dark_forest",
+             "waves":[
+                {"id":"wave_goblins","name":"Гоблины","interval_sec":30,
+                 "enemies":[
+                    {"type":"GOBLIN","count":5,"level":3,"spawn_x":640,"spawn_y":480,"radius":128},
+                    {"type":"WOLF",  "count":2,"level":2,"spawn_x":800,"spawn_y":300,"radius":64},
+                 ]},
+                {"id":"wave_boss","name":"Волна босса","interval_sec":120,
+                 "enemies":[
+                    {"type":"GOBLIN_KING","count":1,"level":10,"spawn_x":720,"spawn_y":400,"radius":32},
+                 ]},
+             ]},
+            {"id":"aethoria_city","name":"Город (мирный)","scene":"aethoria_city",
+             "waves":[]},
+        ]
+
+    def _build(self):
+        main = tk.Frame(self.frame, bg=C["bg"])
+        main.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Глобальные настройки
+        top = tk.Frame(main, bg=C["panel"])
+        top.pack(fill="x", padx=4, pady=4)
+        tk.Label(top, text="🌍 Глобальные параметры спавна", bg=C["panel"],
+                 fg=C["gold"], font=("Segoe UI",9,"bold"), padx=8).pack(side="left")
+        tk.Label(top, text="Макс. врагов:", bg=C["panel"], fg=C["text"],
+                 font=("Segoe UI",9)).pack(side="left", padx=(16,4))
+        self._max_enemies_var = tk.StringVar(value="50")
+        tk.Spinbox(top, textvariable=self._max_enemies_var,
+                   from_=1, to=500, width=6,
+                   bg=C["input_bg"], fg=C["text"], relief="flat").pack(side="left")
+        tk.Label(top, text="Респавн (сек):", bg=C["panel"], fg=C["text"],
+                 font=("Segoe UI",9)).pack(side="left", padx=(16,4))
+        self._respawn_var = tk.StringVar(value="30")
+        tk.Spinbox(top, textvariable=self._respawn_var,
+                   from_=1, to=3600, width=6,
+                   bg=C["input_bg"], fg=C["text"], relief="flat").pack(side="left")
+        btn(top,"💾 Сохранить всё",self._save,C["accent"],"white",padx=10).pack(side="right",padx=8)
+
+        # Paned: зоны | волны | враги волны
+        paned = tk.PanedWindow(main, orient="horizontal", bg=C["bg"], sashwidth=4)
+        paned.pack(fill="both", expand=True, padx=4)
+
+        # Колонка 1: Зоны
+        zone_fr = tk.Frame(paned, bg=C["panel"], width=200)
+        paned.add(zone_fr, minsize=160)
+        tk.Label(zone_fr, text="🗺 Зоны", bg=C["panel"], fg=C["gold2"],
+                 font=("Segoe UI",9,"bold"), pady=4).pack()
+        fr, self._zone_lb = scrolled_listbox(zone_fr, height=20, width=20)
+        fr.pack(fill="both", expand=True, padx=4)
+        self._zone_lb.bind("<<ListboxSelect>>", self._on_zone_select)
+        zb = tk.Frame(zone_fr, bg=C["panel"]); zb.pack(fill="x", padx=4, pady=4)
+        btn(zb,"➕",self._add_zone,C["green"],"black",width=3).pack(side="left")
+        btn(zb,"🗑",self._del_zone,C["red"],  "white",width=3).pack(side="left",padx=2)
+
+        # Колонка 2: Волны
+        wave_fr = tk.Frame(paned, bg=C["panel"], width=220)
+        paned.add(wave_fr, minsize=180)
+        tk.Label(wave_fr, text="🌊 Волны", bg=C["panel"], fg=C["gold2"],
+                 font=("Segoe UI",9,"bold"), pady=4).pack()
+        fr2, self._wave_lb = scrolled_listbox(wave_fr, height=10, width=22)
+        fr2.pack(fill="x", padx=4)
+        self._wave_lb.bind("<<ListboxSelect>>", self._on_wave_select)
+        wb = tk.Frame(wave_fr, bg=C["panel"]); wb.pack(fill="x", padx=4, pady=2)
+        btn(wb,"➕ Волна",self._add_wave,C["green"],"black").pack(side="left")
+        btn(wb,"🗑",      self._del_wave,C["red"],  "white",width=3).pack(side="left",padx=2)
+        # Параметры волны
+        wf = tk.Frame(wave_fr, bg=C["panel2"], bd=1); wf.pack(fill="x", padx=4, pady=4)
+        tk.Label(wf, text="Параметры волны", bg=C["panel2"], fg=C["muted"],
+                 font=("Segoe UI",8,"bold")).pack(anchor="w", padx=4)
+        self._wave_vars = {}
+        for key, label in [("id","ID волны"),("name","Название"),("interval_sec","Интервал (сек)")]:
+            r = tk.Frame(wf, bg=C["panel2"]); r.pack(fill="x", padx=4, pady=2)
+            tk.Label(r, text=label+":", bg=C["panel2"], fg=C["text"],
+                     font=("Segoe UI",8), width=18, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._wave_vars[key] = v
+            entry(r, textvariable=v, width=14).pack(side="left")
+        btn(wf,"✅ Применить",self._apply_wave,C["blue"],"white",padx=8).pack(anchor="w",padx=4,pady=4)
+
+        # Колонка 3: Враги волны
+        enemy_fr = tk.Frame(paned, bg=C["panel"])
+        paned.add(enemy_fr, minsize=280)
+        tk.Label(enemy_fr, text="👾 Враги волны", bg=C["panel"], fg=C["gold2"],
+                 font=("Segoe UI",9,"bold"), pady=4).pack()
+
+        # Таблица врагов
+        cols = ("type","count","level","spawn_x","spawn_y","radius")
+        self._enemy_tree = ttk.Treeview(enemy_fr, columns=cols, show="headings", height=10)
+        hdrs = {"type":"Тип","count":"Кол","level":"Ур","spawn_x":"X","spawn_y":"Y","radius":"R"}
+        widths = {"type":130,"count":45,"level":40,"spawn_x":55,"spawn_y":55,"radius":45}
+        for c in cols:
+            self._enemy_tree.heading(c, text=hdrs[c])
+            self._enemy_tree.column(c, width=widths[c], anchor="center")
+        self._enemy_tree.pack(fill="x", padx=4)
+        self._enemy_tree.bind("<<TreeviewSelect>>", self._on_enemy_select)
+
+        eb = tk.Frame(enemy_fr, bg=C["panel"]); eb.pack(fill="x", padx=4, pady=2)
+        btn(eb,"➕ Добавить",self._add_enemy,C["green"],"black").pack(side="left")
+        btn(eb,"🗑 Удалить", self._del_enemy,C["red"],  "white").pack(side="left",padx=4)
+
+        # Форма редактирования врага
+        ef = tk.Frame(enemy_fr, bg=C["panel2"], bd=1); ef.pack(fill="x", padx=4, pady=4)
+        tk.Label(ef, text="Редактор врага", bg=C["panel2"], fg=C["muted"],
+                 font=("Segoe UI",8,"bold")).pack(anchor="w", padx=4)
+        self._enemy_vars = {}
+        row1 = tk.Frame(ef, bg=C["panel2"]); row1.pack(fill="x", padx=4, pady=2)
+        tk.Label(row1, text="Тип:", bg=C["panel2"], fg=C["text"],
+                 font=("Segoe UI",8)).pack(side="left")
+        v = tk.StringVar(); self._enemy_vars["type"] = v
+        ttk.Combobox(row1, values=self.ENEMY_TYPES, textvariable=v,
+                     state="readonly", width=16).pack(side="left", padx=4)
+
+        for key, label in [("count","Кол-во"),("level","Уровень"),
+                            ("spawn_x","X"),("spawn_y","Y"),("radius","Радиус")]:
+            r = tk.Frame(ef, bg=C["panel2"]); r.pack(fill="x", padx=4, pady=1)
+            tk.Label(r, text=label+":", bg=C["panel2"], fg=C["text"],
+                     font=("Segoe UI",8), width=10, anchor="w").pack(side="left")
+            v = tk.StringVar(); self._enemy_vars[key] = v
+            tk.Spinbox(r, textvariable=v, from_=0, to=9999, width=8,
+                       bg=C["input_bg"], fg=C["text"], relief="flat").pack(side="left")
+        btn(ef,"✅ Применить",self._apply_enemy,C["blue"],"white",padx=8).pack(anchor="w",padx=4,pady=4)
+
+    # ── Зоны ────────────────────────────────────────────────
+    def _refresh_zones(self):
+        self._zone_lb.delete(0,"end")
+        for z in self._config.get("zones",[]):
+            self._zone_lb.insert("end", z.get("name", z.get("id","?")))
+
+    def _on_zone_select(self, ev=None):
+        sel = self._zone_lb.curselection()
+        if not sel: return
+        self._sel_zone = sel[0]
+        self._sel_wave = -1
+        self._refresh_waves()
+
+    def _add_zone(self):
+        new = {"id":f"zone_{len(self._config['zones'])}",
+               "name":"Новая зона","scene":"","waves":[]}
+        self._config["zones"].append(new)
+        self._refresh_zones()
+
+    def _del_zone(self):
+        if self._sel_zone < 0: return
+        if messagebox.askyesno("Удалить?","Удалить зону и все волны?"):
+            self._config["zones"].pop(self._sel_zone)
+            self._sel_zone = -1
+            self._refresh_zones()
+            self._refresh_waves()
+
+    # ── Волны ────────────────────────────────────────────────
+    def _refresh_waves(self):
+        self._wave_lb.delete(0,"end")
+        if self._sel_zone < 0: return
+        z = self._config["zones"][self._sel_zone]
+        for w in z.get("waves",[]):
+            n = len(w.get("enemies",[]))
+            self._wave_lb.insert("end",
+                f"[{w.get('interval_sec',0)}с] {w.get('name',w.get('id','?'))} ({n} врагов)")
+
+    def _on_wave_select(self, ev=None):
+        sel = self._wave_lb.curselection()
+        if not sel: return
+        self._sel_wave = sel[0]
+        if self._sel_zone < 0: return
+        z = self._config["zones"][self._sel_zone]
+        waves = z.get("waves",[])
+        if self._sel_wave >= len(waves): return
+        w = waves[self._sel_wave]
+        self._wave_vars["id"].set(w.get("id",""))
+        self._wave_vars["name"].set(w.get("name",""))
+        self._wave_vars["interval_sec"].set(str(w.get("interval_sec",30)))
+        self._refresh_enemies()
+
+    def _apply_wave(self):
+        if self._sel_zone < 0 or self._sel_wave < 0: return
+        z = self._config["zones"][self._sel_zone]
+        w = z["waves"][self._sel_wave]
+        w["id"]   = self._wave_vars["id"].get()
+        w["name"] = self._wave_vars["name"].get()
+        try: w["interval_sec"] = int(self._wave_vars["interval_sec"].get())
+        except: pass
+        self._refresh_waves()
+
+    def _add_wave(self):
+        if self._sel_zone < 0: return
+        z = self._config["zones"][self._sel_zone]
+        z.setdefault("waves",[]).append({
+            "id":f"wave_{len(z['waves'])}","name":"Новая волна",
+            "interval_sec":30,"enemies":[]})
+        self._refresh_waves()
+
+    def _del_wave(self):
+        if self._sel_zone < 0 or self._sel_wave < 0: return
+        z = self._config["zones"][self._sel_zone]
+        if messagebox.askyesno("Удалить?","Удалить волну?"):
+            z["waves"].pop(self._sel_wave)
+            self._sel_wave = -1
+            self._refresh_waves()
+            self._refresh_enemies()
+
+    # ── Враги ────────────────────────────────────────────────
+    def _get_wave(self):
+        if self._sel_zone < 0 or self._sel_wave < 0: return None
+        z = self._config["zones"][self._sel_zone]
+        waves = z.get("waves",[])
+        if self._sel_wave >= len(waves): return None
+        return waves[self._sel_wave]
+
+    def _refresh_enemies(self):
+        for row in self._enemy_tree.get_children():
+            self._enemy_tree.delete(row)
+        w = self._get_wave()
+        if not w: return
+        for e in w.get("enemies",[]):
+            self._enemy_tree.insert("","end",values=(
+                e.get("type","?"), e.get("count",1), e.get("level",1),
+                e.get("spawn_x",0), e.get("spawn_y",0), e.get("radius",64)))
+
+    def _on_enemy_select(self, ev=None):
+        sel = self._enemy_tree.selection()
+        if not sel: return
+        vals = self._enemy_tree.item(sel[0])["values"]
+        keys = ["type","count","level","spawn_x","spawn_y","radius"]
+        for k,v in zip(keys,vals):
+            self._enemy_vars[k].set(str(v))
+
+    def _apply_enemy(self):
+        w = self._get_wave()
+        if not w: return
+        sel = self._enemy_tree.selection()
+        if not sel: return
+        idx = self._enemy_tree.index(sel[0])
+        enemies = w.setdefault("enemies",[])
+        if idx >= len(enemies): return
+        e = enemies[idx]
+        e["type"] = self._enemy_vars["type"].get()
+        for key in ["count","level","spawn_x","spawn_y","radius"]:
+            try: e[key] = int(self._enemy_vars[key].get())
+            except: pass
+        self._refresh_enemies()
+        self._refresh_waves()
+
+    def _add_enemy(self):
+        w = self._get_wave()
+        if not w: return
+        w.setdefault("enemies",[]).append({
+            "type":"GOBLIN","count":3,"level":1,
+            "spawn_x":640,"spawn_y":480,"radius":96})
+        self._refresh_enemies()
+        self._refresh_waves()
+
+    def _del_enemy(self):
+        w = self._get_wave()
+        if not w: return
+        sel = self._enemy_tree.selection()
+        if not sel: return
+        idx = self._enemy_tree.index(sel[0])
+        if messagebox.askyesno("Удалить?","Удалить врага из волны?"):
+            w["enemies"].pop(idx)
+            self._refresh_enemies()
+            self._refresh_waves()
 
 
 # ══════════════════════════════════════════════════════════════
