@@ -33,8 +33,8 @@ struct SceneInfo {
 // ═══════════════════════════════════════════════════════════════
 // ЗАГРУЖЕННАЯ СЦЕНА (данные для движка)
 // ═══════════════════════════════════════════════════════════════
-const int SCENE_MAP_W = 120;
-const int SCENE_MAP_H = 120;
+const int SCENE_MAP_W = 512;
+const int SCENE_MAP_H = 512;
 
 enum class SceneTileType {
     GRASS, DIRT, STONE_FLOOR, ROAD, WALL, WATER, TREE,
@@ -48,6 +48,7 @@ struct SceneTile {
     bool          walkable = true;
     sf::Color     color    = sf::Color(60,140,50);
     int           variant  = 0;
+    std::string   tileId;   // для кастомных тайлов: оригинальный ID из JSON (напр. "MY_TILE")
 };
 
 // Описание врага из карты (заполняется при парсинге, используется spawnEnemies)
@@ -124,7 +125,63 @@ namespace SceneUtils {
             t.color = it->second.c;
             return t;
         }
-        return SceneTile{};  // default GRASS
+
+        // ── Кастомные тайлы из assets/custom_tiles.json ──────────
+        // Парсим цвет из sfml-строки "R,G,B" или hex "#rrggbb"
+        {
+            static std::map<std::string, SceneTile> customCache;
+            static bool customLoaded = false;
+            if (!customLoaded) {
+                customLoaded = true;
+                std::ifstream cf("assets/custom_tiles.json");
+                if (cf.is_open()) {
+                    std::stringstream buf; buf << cf.rdbuf();
+                    auto root = SimpleJSON::Parser::parse(buf.str());
+                    if (root && root->isArray()) {
+                        for (size_t i = 0; i < root->arrayVal.size(); i++) {
+                            auto j = root->get(i);
+                            if (!j) continue;
+                            std::string tid = j->get("id") ? j->get("id")->asString() : "";
+                            if (tid.empty()) continue;
+                            SceneTile ct;
+                            // walkable
+                            ct.walkable = j->get("walkable") ? j->get("walkable")->asBool() : true;
+                            // texture path (stored as string in variant=99 signal)
+                            ct.variant = 99;  // сигнал: кастомный тайл с текстурой
+                            // цвет из "sfml": "R,G,B"
+                            sf::Color col(128,128,128);
+                            std::string sfmlStr = j->get("sfml") ? j->get("sfml")->asString() : "";
+                            if (!sfmlStr.empty()) {
+                                int r=128,g=128,b=128;
+                                sscanf(sfmlStr.c_str(), "%d,%d,%d", &r, &g, &b);
+                                col = sf::Color(
+                                    (uint8_t)std::clamp(r,0,255),
+                                    (uint8_t)std::clamp(g,0,255),
+                                    (uint8_t)std::clamp(b,0,255));
+                            }
+                            ct.color = col;
+                            // Тип — кастомные используют DUNGEON_FLOOR как базовый
+                            ct.type = SceneTileType::DUNGEON_FLOOR;
+                            customCache[tid] = ct;
+                        }
+                        std::cout << "[SceneUtils] Загружено custom_tiles: "
+                                  << customCache.size() << "\n";
+                    }
+                }
+            }
+            auto cit = customCache.find(s);
+            if (cit != customCache.end()) {
+                SceneTile result = cit->second;
+                result.tileId = s;  // сохраняем ID для рендеринга текстуры
+                return result;
+            }
+        }
+
+        // Неизвестный тайл → трава (без краша)
+        SceneTile fallback;
+        fallback.color = sf::Color(60,140,50);
+        std::cout << "[WARN] Неизвестный тайл '" << s << "' → GRASS\n";
+        return fallback;
     }
 
     // Slugify display name → file id: "Dark Forest" → "dark_forest"
@@ -316,9 +373,18 @@ public:
             return false;
         }
 
-        // Выгружаем текущую
+        // FIX: НЕ очищаем весь entitySystem — сохраняем PLAYER сущность.
+        // onSceneUnload (в GameEngine) уже удалит NPC/OBJECT/PORTAL/ENEMY.
+        // es.clear() здесь приводило к потере playerEntityId → NPC внутри игрока.
+        // Выгружаем текущую (коллбэк очищает NPC/enemy/portal из entitySystem)
         if (current_.loaded && onSceneUnload) onSceneUnload();
-        es.clear();
+        // Оставляем только PLAYER (на случай если onSceneUnload не убрал всё):
+        {
+            auto& all = es.getAll();
+            all.erase(std::remove_if(all.begin(), all.end(), [](const Entity& e){
+                return e.type != EntityType::PLAYER;
+            }), all.end());
+        }
 
         const SceneInfo& info = it->second;
         std::string path = info.mapFile;
@@ -486,8 +552,7 @@ public:
         }
         f << "  ],\n";
 
-        // entities
-        f << "  \"entities\": [\n";
+        // entities  FIX: убрано дублирование ключа "entities" (было 2 строки — невалидный JSON)
         f << "  \"entities\": [\n";
 
 const auto& all = es.getAll();

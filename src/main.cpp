@@ -25,18 +25,24 @@
 // ════════════════════════════════════════════════════════════════
 #include "animation_system.hpp"
 #include "anim_state_machine.hpp"
+#include "audio_manager.hpp"        // FIX: добавлен include для AudioManager
 #include "entity_system.hpp"
 #include "scene_system.hpp"
 #include "trigger_system.hpp"
 #include "prefab_system.hpp"   // Этап 1: каталог префабов
 #include "quest_system.hpp"    // Этап 1: система квестов
+// ── Редмап: новые системы ───────────────────────────────────
+#include "event_system.hpp"    // Приоритет 1: EventBus
+#include "skill_system.hpp"    // Приоритет 2: Скиллы
+#include "item_system.hpp"     // Приоритет 2: Предметы + инвентарь
+#include "ai_system.hpp"       // Приоритет 3: AI FSM
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 const int TILE         = 32;
-const int MAP_W        = 120;
-const int MAP_H        = 120;
+const int MAP_W        = 512;
+const int MAP_H        = 512;
 const int WINDOW_W     = 1400;
 const int WINDOW_H     = 900;
 const int CITY_CX      = 60;
@@ -113,7 +119,8 @@ struct Enemy {
     float       animTime = 0;
     AnimationPlayer* animPlayer = nullptr;
     AnimStateMachine stateMachine;
-    bool        deathProcessed = false;  // Этап 1: флаг обработки смерти (награды/квесты)
+    bool        deathProcessed = false;
+    AIComponent ai;    // Приоритет 3: AI FSM компонент
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -130,7 +137,8 @@ struct Player {
     float speed,attackCD,currentAttackCD,comboTimer;
     int   combo;
     std::vector<Skill> skills;
-    std::vector<Item>  inventory;
+    std::vector<Item>  inventory;   // legacy инвентарь (для HUD и старых функций)
+    Inventory          bag;         // FIX: новый Inventory для ItemSystem::giveToInventory
     int   hpPotions=5, mpPotions=3;
     float animTime=0;
     bool  moving=false;
@@ -304,8 +312,14 @@ public:
     bool fontLoaded=false;
 
     AnimationManager* animManager = nullptr;
+    AudioManager*     audioManager = nullptr;   // FIX: был используется но не объявлен
     EntitySystem entitySystem;
     uint32_t playerEntityId = 0;
+
+    // ── Текстуры кастомных тайлов (из custom_tiles.json) ──────────
+    std::map<std::string, sf::Texture> customTileTextures;
+    std::map<std::string, sf::Sprite>  customTileSprite;
+    bool customTilesTexturesLoaded = false;
 
     // ── Этап 1: Prefab + Quest системы ───────────────────────────
     PrefabCatalog prefabCatalog;
@@ -313,6 +327,12 @@ public:
     // Последние строки квест-диалога (для HUD-уведомлений)
     std::string   questNotification;
     float         questNotifyTimer = 0.f;
+
+    // ── Редмап: новые системы ─────────────────────────────────
+    EventBus    eventBus;      // Приоритет 1: шина событий
+    SkillSystem skillSystem;   // Приоритет 2: скиллы
+    ItemSystem  itemSystem;    // Приоритет 2: предметы
+    AISystem    aiSystem;      // Приоритет 3: AI FSM
 
     // Система сцен
     SceneManager sceneManager;
@@ -456,6 +476,7 @@ public:
 
     ~GameEngine() {
         if (animManager) delete animManager;
+        if (audioManager) delete audioManager;          // FIX: освобождаем audioManager
         if (player.animPlayer) delete player.animPlayer;
         for (auto& enemy : enemies) if (enemy.animPlayer) delete enemy.animPlayer;
     }
@@ -480,6 +501,62 @@ public:
             std::cerr << "[WARNING] Не удалось загрузить animations.json" << std::endl;
         else
             std::cout << "[OK] Система анимаций инициализирована успешно!" << std::endl;
+        audioManager = new AudioManager();             // FIX: инициализируем audioManager
+        // AudioManager::initializeSoundEffects() вызывается в конструкторе — загружаем все звуки
+        {
+            // Загружаем звуки через публичный API
+            const char* sounds[][2] = {
+                {"slash",    "assets/sounds/slash.wav"},
+                {"fireball", "assets/sounds/fireball.wav"},
+                {"heal",     "assets/sounds/heal.wav"},
+                {"damage",   "assets/sounds/damage.wav"},
+                {"critical", "assets/sounds/critical.wav"},
+                {"levelup",  "assets/sounds/levelup.wav"},
+                {"death",    "assets/sounds/death.wav"},
+                {"pickup",   "assets/sounds/pickup.wav"},
+                {"ui_click", "assets/sounds/ui_click.wav"},
+                {nullptr, nullptr}
+            };
+            for (int i = 0; sounds[i][0]; i++)
+                audioManager->loadSound(sounds[i][0], sounds[i][1]);
+        }
+        loadCustomTileTextures();                      // FIX: загружаем кастомные тайлы
+    }
+
+    // ── Загрузка текстур кастомных тайлов из custom_tiles.json ───
+    void loadCustomTileTextures() {
+        if (customTilesTexturesLoaded) return;
+        customTilesTexturesLoaded = true;
+        std::ifstream f("assets/custom_tiles.json");
+        if (!f.is_open()) return;
+        std::stringstream buf; buf << f.rdbuf();
+        auto root = SimpleJSON::Parser::parse(buf.str());
+        if (!root || !root->isArray()) return;
+        int loaded = 0;
+        for (size_t i = 0; i < root->arrayVal.size(); i++) {
+            auto j = root->get(i);
+            if (!j) continue;
+            std::string tid = j->get("id") ? j->get("id")->asString() : "";
+            std::string tex = j->get("texture") ? j->get("texture")->asString() : "";
+            if (tid.empty() || tex.empty()) continue;
+            std::vector<std::string> candidates = {
+                tex, "assets/textures/tiles/" + tex,
+                "assets/" + tex, "assets/textures/" + tex,
+            };
+            for (auto& path : candidates) {
+                sf::Texture t;
+                if (t.loadFromFile(path)) {
+                    t.setRepeated(false); t.setSmooth(false);
+                    customTileTextures[tid] = std::move(t);
+                    sf::Sprite sp(customTileTextures[tid]);
+                    customTileSprite[tid] = sp;
+                    loaded++;
+                    std::cout << "[OK] Текстура тайла '" << tid << "': " << path << "\n";
+                    break;
+                }
+            }
+        }
+        std::cout << "[OK] Загружено текстур кастомных тайлов: " << loaded << "\n";
     }
 
     std::string savePath(){
@@ -538,6 +615,16 @@ public:
             enemies.clear();
             fountains.clear();
             mapEnemyDefs.clear();
+            // FIX: критический баг — очищаем NPC/OBJECT/PORTAL сущности при смене сцены.
+            // Враги и игрок управляются отдельно, их не трогаем тут.
+            auto& all = entitySystem.getAll();
+            all.erase(std::remove_if(all.begin(), all.end(), [](const Entity& e){
+                return e.type == EntityType::NPC ||
+                       e.type == EntityType::OBJECT ||
+                       e.type == EntityType::PORTAL ||
+                       e.type == EntityType::ITEM_DROP ||
+                       e.type == EntityType::ENEMY;
+            }), all.end());
         };
         sceneManager.loadFromConfig("assets/game_config.json");
         if (sceneManager.sceneOrder().empty()) {
@@ -627,6 +714,63 @@ public:
             std::cout << "[Quest] Квестов нет — создаём файл по умолчанию\n";
         }
         questSystem.printStatus();
+
+        // ── Редмап Приоритет 2: Скиллы и предметы ────────────────
+        skillSystem.loadDefs("assets/skills.json");
+        itemSystem.loadItems("assets/items.json");
+        itemSystem.loadDropTables("assets/drop_tables.json");
+
+        // ── Редмап Приоритет 1: EventBus wire-up ─────────────────
+        _initEventHandlers();
+    }
+
+    void _initEventHandlers() {
+        // Убийство врага → квест + лут + XP/gold
+        eventBus.on<EnemyKilledEvent>([&](const EnemyKilledEvent& ev) {
+            // Квесты
+            auto qResults = questSystem.onKill(ev.enemyName);
+            for (auto& r : qResults) {
+                player.xp   += r.xpRewarded;
+                player.gold += r.goldRewarded;
+                if (r.questCompleted) {
+                    questNotification = "✓ Квест: " + r.questName;
+                    questNotifyTimer  = 4.f;
+                }
+            }
+            // Лут в инвентарь (новый Inventory)
+            auto loot = itemSystem.rollLoot(ev.enemyName, ev.enemyLevel);
+            for (auto& l : loot) {
+                itemSystem.giveToInventory(player.bag, l.itemId, l.count);
+            }
+            // XP + gold от врага напрямую
+            player.xp   += ev.xpReward;
+            player.gold += ev.goldDrop;
+            checkLevelUp();
+        });
+
+        // Подбор предмета → квест
+        eventBus.on<ItemPickupEvent>([&](const ItemPickupEvent& ev) {
+            questSystem.onCollect(ev.itemName, ev.count);
+        });
+
+        // Level-up уведомление
+        eventBus.on<LevelUpEvent>([&](const LevelUpEvent& ev) {
+            questNotification = "⬆ УРОВЕНЬ " + std::to_string(ev.newLevel) + "!";
+            questNotifyTimer  = 5.f;
+            if (audioManager) audioManager->playSound("levelup");
+        });
+
+        // NPC диалог через EventBus
+        eventBus.on<NpcDialogueEvent>([&](const NpcDialogueEvent& ev) {
+            dialogText  = ev.message;
+            dialogTimer = ev.duration;
+        });
+
+        // Квест принят
+        eventBus.on<QuestAcceptedEvent>([&](const QuestAcceptedEvent& ev) {
+            questNotification = "! Задание принято";
+            questNotifyTimer  = 3.f;
+        });
     }
 
     void applySceneData(const SceneData& sd) {
@@ -844,6 +988,13 @@ public:
 
     void spawnEnemies(){
         enemies.clear();
+        // FIX: очищаем старые ENEMY-сущности из entitySystem перед спауном
+        {
+            auto& all = entitySystem.getAll();
+            all.erase(std::remove_if(all.begin(), all.end(), [](const Entity& e){
+                return e.type == EntityType::ENEMY;
+            }), all.end());
+        }
         if (!mapEnemyDefs.empty()) {
             for (auto& def : mapEnemyDefs) {
                 Enemy e;
@@ -945,9 +1096,11 @@ public:
         Entity* target = nullptr;
         for (auto& e : entitySystem.getAll()) {
             if (!e.active) continue;
-            if (e.type==EntityType::ENEMY || e.type==EntityType::PLAYER) continue;
-            float dx=player.pos.x-e.x, dy=player.pos.y-e.y;
-            float d2=dx*dx+dy*dy;
+            // FIX: исключаем ENEMY и PLAYER — и особо проверяем ID игрока
+            if (e.type == EntityType::ENEMY || e.type == EntityType::PLAYER) continue;
+            if (e.id == playerEntityId) continue;   // FIX: явно пропускаем сущность игрока
+            float dx = player.pos.x - e.x, dy = player.pos.y - e.y;
+            float d2 = dx*dx + dy*dy;
             if(d2 < bestDist) { bestDist=d2; target=&e; }
         }
         if(!target) return;
@@ -1257,6 +1410,9 @@ public:
                 return dead;
             }),enemies.end());
         entitySystem.purgeInactive();
+
+        // ── Редмап Приоритет 1: flush EventBus ───────────────────
+        eventBus.flush();
     }
 
     void updatePlayer(float dt){
@@ -1449,24 +1605,38 @@ public:
         floatingTexts.push_back({e.pos + V2(0, -36),
             "+" + std::to_string(goldGain) + "g", 2.f, sf::Color(255, 210, 60), false});
 
-        // ── 3. Квест-прогресс ─────────────────────────────────────
+        // ── 3. Квест-прогресс + лут через EventBus ───────────────
+        {
+            EnemyKilledEvent ev;
+            ev.enemyName  = e.name;
+            ev.enemyLevel = e.level;
+            ev.posX       = e.pos.x;
+            ev.posY       = e.pos.y;
+            ev.goldDrop   = goldGain;
+            ev.xpReward   = xpGain;
+            eventBus.enqueue(ev);  // обработается в flush() в конце update()
+        }
+        // Прямой quest.onKill (синхронно, для обратной совместимости)
         auto results = questSystem.onKill(e.name);
         for (auto& r : results) {
-            // Дополнительная награда за выполнение квеста
-            player.xp   += r.xpRewarded;
-            player.gold += r.goldRewarded;
-            for (auto& itm : r.itemsRewarded)
-                player.inventory.push_back({itm, "quest_reward", 1, 0, 0, 0});
-            questNotification = "Квест выполнен: " + r.questName +
-                "\n+" + std::to_string(r.xpRewarded) + " XP  +" +
-                std::to_string(r.goldRewarded) + "g";
-            questNotifyTimer = 6.f;
-            spawnParticles(player.pos, ParticleT::HEAL, 25);
+            if (r.questCompleted) {
+                questNotification = "✓ Квест: " + r.questName;
+                questNotifyTimer = 6.f;
+                spawnParticles(player.pos, ParticleT::HEAL, 25);
+            }
         }
 
         // ── 4. Level-up ───────────────────────────────────────────
+        checkLevelUp();
+
+        // ── 5. Этап 3: Лут ────────────────────────────────────────
+        spawnLoot(e.pos, e.level, e.boss);
+    }
+
+    void checkLevelUp() {
         while (player.xp >= player.xpNext) {
             player.xp -= player.xpNext;
+            int oldLv = player.level;
             player.level++;
             player.xpNext = 100 + player.level * 50;
             player.maxHp += 10; player.hp = player.maxHp;
@@ -1476,10 +1646,9 @@ public:
                 "LEVEL UP! Lv." + std::to_string(player.level),
                 3.f, sf::Color(255, 220, 50), true});
             spawnParticles(player.pos, ParticleT::CRITICAL, 30);
+            LevelUpEvent ev; ev.oldLevel = oldLv; ev.newLevel = player.level;
+            eventBus.emit(ev);
         }
-
-        // ── 5. Этап 3: Лут ────────────────────────────────────────
-        spawnLoot(e.pos, e.level, e.boss);
     }
 
     void spawnParticles(V2 pos, ParticleT type, int count){
@@ -1736,7 +1905,21 @@ public:
                     tile.setFillColor(sf::Color(120,115,105)); window.draw(tile);
                     break;
                 default:
-                    tile.setFillColor(t.color); window.draw(tile);
+                    // FIX: кастомный тайл по tileId (поле SceneTile из scene_system.hpp)
+                    if (!t.tileId.empty()) {
+                        auto it = customTileSprite.find(t.tileId);
+                        if (it != customTileSprite.end()) {
+                            it->second.setPosition(wx, wy);
+                            it->second.setScale(
+                                (float)TILE / std::max(1, it->second.getTextureRect().width),
+                                (float)TILE / std::max(1, it->second.getTextureRect().height));
+                            window.draw(it->second);
+                        } else {
+                            tile.setFillColor(t.color); window.draw(tile);
+                        }
+                    } else {
+                        tile.setFillColor(t.color); window.draw(tile);
+                    }
                     break;
                 }
             }
@@ -2393,11 +2576,11 @@ int main(){
 #ifdef _WIN32
     SetConsoleOutputCP(65001);
     SetConsoleCP(65001);
-    // Убираем кракозябру в заголовке консоли
     SetConsoleTitleA("AETHORIA: Eternal Realms — Engine");
 #endif
     std::setlocale(LC_ALL, ".UTF-8");
-    GameEngine engine;
-    engine.run();
+    // FIX: MAP 512×512 — создаём GameEngine в куче, а не на стеке (worldMap ~1MB)
+    auto engine = std::make_unique<GameEngine>();
+    engine->run();
     return 0;
 }
