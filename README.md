@@ -1,22 +1,16 @@
 <div align="center">
 
-<img src="docs/images/logo.png" width="420"/>
+```
+ █████╗ ███████╗████████╗██╗  ██╗ ██████╗ ██████╗ ██╗ █████╗
+██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗██║██╔══██╗
+███████║█████╗     ██║   ███████║██║   ██║██████╔╝██║███████║
+██╔══██║██╔══╝     ██║   ██╔══██║██║   ██║██╔══██╗██║██╔══██║
+██║  ██║███████╗   ██║   ██║  ██║╚██████╔╝██║  ██║██║██║  ██║
+╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
+           E T E R N A L   R E A L M S
+```
 
-<br/>
-
-# 🔥 AETHORIA: Eternal Realms 🔥
-
-### ⚔️ Custom MMORPG Engine • C++17 • SFML ⚔️
-
-<p align="center">
-  <img src="https://img.shields.io/badge/ENGINE-C++17-blue?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/RENDER-SFML-green?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/EDITOR-Python-orange?style=for-the-badge"/>
-</p>
-
----
-
-### 🌑 Славянская мифология • 东方幻想 • Технологический СССР 🌑
+**MMORPG Engine (C++17 + SFML) with integrated Python Editor**
 
 </div>
 
@@ -24,105 +18,59 @@
 
 ## 🌍 Language / Язык
 
-**🇷🇺 Русский** • [🇺🇸 English](#english)
+**🇷🇺 Русский** | [🇺🇸 English](#english)
 
 ---
 
-# 🇷🇺 РУССКАЯ ВЕРСИЯ
+# 🇷🇺 Русская версия
+
+## ✨ Обзор
+
+**Aethoria: Eternal Realms** — это полноценный MMORPG-движок, написанный с нуля на C++17 с использованием SFML.
+
+Ключевая идея проекта:
+
+* собственная архитектура
+* data-driven подход (JSON)
+* встроенный инструмент разработки (редактор)
+
+Проект не использует сторонние игровые движки.
 
 ---
 
-## ⚔️ О ПРОЕКТЕ
+## 🎮 Возможности
 
-**Aethoria: Eternal Realms** — это кастомный MMORPG-движок, созданный с нуля.
+### ⚔ Движок
 
-🔥 Без готовых решений
-🔥 Полный контроль над системой
-🔥 Своя архитектура + свой toolchain
-
-Проект вдохновлён смесью:
-
-* славянской мифологии
-* восточной (китайской) эстетики
-* индустриального духа СССР
-
----
-
-## 🧠 ФИЛОСОФИЯ
-
-```
-DATA → JSON → ENGINE → WORLD
-```
-
-* данные управляют игрой
-* логика отделена от контента
-* редактор = часть движка
-
----
-
-## 🎮 ДВИЖОК
-
-### ⚔️ Core
-
-* Реалтайм бой
-* AI (FSM поведение)
-* Entity system
-* Scene system
-* Эффекты и анимации
-* Аудио система
-
----
-
-### 🌍 Мир
-
+* Реалтайм боевая система
+* AI: Idle → Patrol → Aggro → Combat
 * Тайловая карта
-* NPC / враги / порталы
-* JSON сцены
-* Динамическая загрузка
+* Entity system (NPC, враги, порталы)
+* Система анимаций (spritesheets)
+* Аудио (музыка + SFX)
+* Scene system
+* Загрузка/сохранение через JSON
+* Визуальные эффекты
 
 ---
 
-### 🔥 Pipeline
+### 🛠 Редактор (Python / Tkinter)
 
-* JSON-first архитектура
-* Ассеты подгружаются автоматически
-* Нет жёстко захардкоженных данных
-
----
-
-## 🛠 РЕДАКТОР (Python)
-
-### 🎨 Возможности
-
-* Карта (рисование + flood fill)
-* NPC / враги
+* Редактор карт
+* Размещение NPC и врагов
 * Префабы
 * Квесты и диалоги
-* Конфиги
-
----
-
-### ⚡ Особенности
-
+* Конфигурация игры
 * Undo / Redo
-* Быстрая итерация
-* Прямая интеграция с движком
+* Прямая синхронизация
 
 ---
 
-## 🎨 ВИЗУАЛЫ
+## 🎨 Asset Pipeline
 
-### 🧍 Спрайты
+Проект использует полностью **JSON-ориентированную систему ассетов**.
 
-<p align="center">
-  <img src="assets/textures/sprites/player_idle.png" width="160"/>
-  <img src="assets/textures/sprites/player_run.png" width="160"/>
-  <img src="assets/textures/sprites/wolf_idle.png" width="160"/>
-</p>
-
----
-
-## 📦 ASSET SYSTEM
+### 📦 Структура
 
 ```
 assets/
@@ -133,54 +81,90 @@ assets/
 ├── scenes/
 ├── sounds/
 ├── textures/
-├── *.json
+├── dialogues.json
+├── items.json
+├── quests.json
+├── prefabs.json
+├── game_config.json
+├── server_config.json
+└── ui_config.json
 ```
 
 ---
 
-## 🏗 АРХИТЕКТУРА
+### 🗺 Сцены
+
+Сцены задаются через JSON и управляют:
+
+* логикой зоны
+* PvP
+* ограничениями уровня
+* параметрами окружения
+
+---
+
+### 🔄 Интеграция
+
+* редактор генерирует JSON
+* движок читает напрямую
+* без промежуточных форматов
+
+---
+
+## 🏗 Архитектура
 
 ```
 ENGINE (C++)
-├── Core
-├── Scene
-├── Entity
+├── Scene System
+├── Entity System
 ├── Animation
-└── Audio
+├── Audio
+└── Core
 
 EDITOR (Python)
-├── Map
+├── Map Editor
 ├── Quests
 ├── Dialogues
 └── Config
+
+DATA
+└── JSON + Assets
 ```
 
 ---
 
-## 📁 СТРУКТУРА
+## 📁 Структура проекта
 
 ```
 project_root/
 ├── assets/
 ├── build/
-├── docs/images/logo.png
+├── docs/
 ├── editor/
 ├── saves/
 ├── src/
 ├── CMakeLists.txt
 ├── build.sh
+├── build.bat
 └── README.md
 ```
 
 ---
 
-## 🔨 СБОРКА
+## 🔨 Сборка
 
 ### 🐧 Linux / 🍎 macOS
 
 ```
 ./build.sh
 ```
+
+Что делает скрипт:
+
+* проверяет cmake и компилятор
+* проверяет SFML
+* собирает проект
+* предлагает сразу запустить игру или редактор
 
 ---
 
@@ -192,15 +176,31 @@ build.bat
 
 ---
 
-## ▶️ ЗАПУСК
+## ⚙️ Особенности сборки
+
+* CMake автоматически подключает SFML
+* после сборки:
+
+  * копируются **assets/**
+  * копируются **SFML DLL**
+
+👉 проект запускается без ручной настройки
+
+---
+
+## ▶️ Запуск
+
+После сборки:
 
 ```
 ./build/AETHORIA
 ```
 
+или через build.sh (интерактивно)
+
 ---
 
-## 🗺 РЕДАКТОР
+## 🗺 Редактор
 
 ```
 python editor/aethoria_editor3.py
@@ -208,96 +208,98 @@ python editor/aethoria_editor3.py
 
 ---
 
-## 🔄 WORKFLOW
+## 🔄 Workflow
 
 ```
-EDITOR → JSON → ENGINE
+Редактор → JSON → Движок
 ```
 
----
-
-## 🚀 ROADMAP
-
-### 🥇 Core
-
-* Event System
-* Skill System
-* Item System
+* Ctrl+S в редакторе
+* данные сразу доступны игре
 
 ---
 
-### 🥈 Multiplayer
+## 🎮 Управление
 
-* Server
-* Sync
-* Zones
-
----
-
-### 🥉 MMO
-
-* Accounts
-* Database
-* Persistence
-
----
-
-### 🔥 Advanced
-
-* Visual Scripting
-* Behavior Trees
-* World Streaming
-
----
-
-## ⚡ СТАТУС
-
-🟢 Активная разработка
-🟡 Архитектура готова
-🔴 MMO системы в процессе
+| Кнопка | Действие    |
+| ------ | ----------- |
+| WASD   | движение    |
+| 1–4    | способности |
 
 ---
 
 ---
 
-# 🇺🇸 ENGLISH
+# 🇺🇸 English
+
+## ✨ Overview
+
+**Aethoria: Eternal Realms** is a custom-built MMORPG engine written in C++17 using SFML.
+
+Core principles:
+
+* custom architecture
+* data-driven design (JSON)
+* integrated toolchain (editor)
 
 ---
 
-## ⚔️ OVERVIEW
+## 🎮 Features
 
-Custom MMORPG engine built from scratch.
-
----
-
-## 🎮 FEATURES
+### Engine
 
 * Real-time combat
 * AI system
-* Tile world
+* Tile-based world
 * Entity system
-* JSON pipeline
-* Integrated editor
+* Animation system
+* Audio system
+* Scene system
+* JSON save/load
 
 ---
 
-## 🎨 VISUALS
+### Editor
 
-<p align="center">
-  <img src="assets/textures/sprites/player_idle.png" width="160"/>
-  <img src="assets/textures/sprites/player_run.png" width="160"/>
-  <img src="assets/textures/sprites/wolf_idle.png" width="160"/>
-</p>
+* Map editor
+* NPC placement
+* Prefabs
+* Quests & dialogues
+* Config editor
+* Undo/Redo
+* Auto-sync
 
 ---
 
-## 🔨 BUILD
+## 🎨 Assets
+
+```
+assets/
+├── animations/
+├── fonts/
+├── maps/
+├── music/
+├── scenes/
+├── sounds/
+├── textures/
+└── *.json
+```
+
+* JSON-based pipeline
+* Sprite animations
+* Scene definitions
+
+---
+
+## 🔨 Build
+
+### Linux / macOS
 
 ```
 ./build.sh
 ```
 
-or
+### Windows
 
 ```
 build.bat
@@ -305,7 +307,7 @@ build.bat
 
 ---
 
-## ▶️ RUN
+## ▶️ Run
 
 ```
 ./build/AETHORIA
@@ -313,7 +315,7 @@ build.bat
 
 ---
 
-## 🗺 EDITOR
+## 🗺 Editor
 
 ```
 python editor/aethoria_editor3.py
@@ -321,6 +323,6 @@ python editor/aethoria_editor3.py
 
 ---
 
-## 📄 LICENSE
+## 📄 License
 
 See LICENSE

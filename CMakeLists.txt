@@ -11,7 +11,17 @@ set(SFML_DIR "${SFML_ROOT}/lib/cmake/SFML")
 find_package(SFML 2.6 COMPONENTS graphics audio window system REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
+
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+# Иконка — .res передаётся линкеру напрямую через target_link_options
+# (list(APPEND SOURCES ...) не работает с .res в clang-cl + Ninja)
+if(DEFINED ICON_RES_FILE AND NOT ICON_RES_FILE STREQUAL "")
+    message(STATUS "[OK] Icon .res: ${ICON_RES_FILE}")
+    target_link_options(${PROJECT_NAME} PRIVATE "${ICON_RES_FILE}")
+else()
+    message(STATUS "[SKIP] ICON_RES_FILE not set — no icon")
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE sfml-graphics sfml-audio sfml-window sfml-system)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
