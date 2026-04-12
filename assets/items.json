@@ -3,7 +3,7 @@
     "id": "i_wood_sword",
     "name": "Деревянный меч",
     "category": "weapon",
-    "rarity": "Common",
+    "rarity": "Rare",
     "icon": "🗡",
     "stats": {
       "dmg_min": 5,
