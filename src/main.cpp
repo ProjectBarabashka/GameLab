@@ -101,6 +101,18 @@ struct Item {
 };
 
 // ════════════════════════════════════════════════════════════════
+// СТАТУС-ЭФФЕКТЫ (яд, стан, замедление, поджог)
+// ════════════════════════════════════════════════════════════════
+enum class StatusType { POISON, STUN, SLOW, BURN };
+
+struct ActiveStatus {
+    StatusType type;
+    float      duration;   // оставшееся время
+    float      potency;    // урон/с для DoT, % замедления для slow
+    float      tickTimer;  // таймер тика (DoT)
+};
+
+// ════════════════════════════════════════════════════════════════
 // ENEMY
 // ════════════════════════════════════════════════════════════════
 struct Enemy {
@@ -121,6 +133,21 @@ struct Enemy {
     AnimStateMachine stateMachine;
     bool        deathProcessed = false;
     AIComponent ai;    // Приоритет 3: AI FSM компонент
+
+    // Статус-эффекты
+    std::vector<ActiveStatus> statuses;
+    float stunTimer  = 0.f;   // суммарное время стана
+    float slowFactor = 1.f;   // множитель скорости (1=нет слоу, 0.5=50% замедление)
+
+    // Применить статус-эффект
+    void applyStatus(StatusType t, float duration, float potency) {
+        for (auto& s : statuses) {
+            if (s.type == t) { s.duration = std::max(s.duration, duration); return; }
+        }
+        statuses.push_back({t, duration, potency, 0.5f});
+    }
+
+    bool isStunned() const { return stunTimer > 0.f; }
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -139,10 +166,16 @@ struct Player {
     std::vector<Skill> skills;
     std::vector<Item>  inventory;   // legacy инвентарь (для HUD и старых функций)
     Inventory          bag;         // FIX: новый Inventory для ItemSystem::giveToInventory
+    std::vector<SkillInstance> skillInstances;  // SkillSystem runtime instances
     int   hpPotions=5, mpPotions=3;
     float animTime=0;
     bool  moving=false;
     int   facing=0;
+
+    // ── Экипировка (slot → itemId, "" = пусто) ────────────────
+    std::map<std::string, std::string> equipped;
+    // Кэш суммарных бонусов от экипировки (пересчитывается при надевании/снятии)
+    std::map<std::string, float> equipBonuses;
     AnimationPlayer* animPlayer = nullptr;
     AnimStateMachine stateMachine;
 };
@@ -347,6 +380,11 @@ public:
 
     bool showStats=false, showInventory=false, showMap=false;
 
+    // ── UI состояние инвентаря/экипировки ────────────────────
+    int  hoveredInvSlot  = -1;   // слот под курсором мыши
+    int  selectedInvSlot = -1;   // выбранный слот (для экипировки)
+    bool showCharacter   = false; // окно персонажа с экипировкой (C)
+
     // Переменные для диалогов и взаимодействия
     uint32_t  interactTarget = 0;
     std::string dialogText;
@@ -528,34 +566,51 @@ public:
         if (customTilesTexturesLoaded) return;
         customTilesTexturesLoaded = true;
         std::ifstream f("assets/custom_tiles.json");
-        if (!f.is_open()) return;
+        if (!f.is_open()) { std::cout << "[INFO] custom_tiles.json не найден\n"; return; }
         std::stringstream buf; buf << f.rdbuf();
         auto root = SimpleJSON::Parser::parse(buf.str());
         if (!root || !root->isArray()) return;
+
         int loaded = 0;
+        // ── Шаг 1: загружаем все текстуры в map (без создания спрайтов!)
+        // Нельзя создавать sf::Sprite пока вставляем в map — каждая вставка
+        // может реаллоцировать память и указатель внутри спрайта станет висячим.
         for (size_t i = 0; i < root->arrayVal.size(); i++) {
             auto j = root->get(i);
             if (!j) continue;
-            std::string tid = j->get("id") ? j->get("id")->asString() : "";
+            std::string tid = j->get("id")      ? j->get("id")->asString()      : "";
             std::string tex = j->get("texture") ? j->get("texture")->asString() : "";
             if (tid.empty() || tex.empty()) continue;
+            // Ищем файл по нескольким стандартным путям
             std::vector<std::string> candidates = {
-                tex, "assets/textures/tiles/" + tex,
-                "assets/" + tex, "assets/textures/" + tex,
+                tex,
+                "assets/textures/tiles/" + tex,
+                "assets/tiles/" + tex,
+                "assets/" + tex,
+                "assets/textures/" + tex,
             };
             for (auto& path : candidates) {
                 sf::Texture t;
                 if (t.loadFromFile(path)) {
-                    t.setRepeated(false); t.setSmooth(false);
+                    t.setRepeated(false);
+                    t.setSmooth(false);
                     customTileTextures[tid] = std::move(t);
-                    sf::Sprite sp(customTileTextures[tid]);
-                    customTileSprite[tid] = sp;
                     loaded++;
                     std::cout << "[OK] Текстура тайла '" << tid << "': " << path << "\n";
                     break;
                 }
             }
+            if (!customTileTextures.count(tid))
+                std::cout << "[WARN] Текстура тайла '" << tid << "' не найдена: " << tex << "\n";
         }
+
+        // ── Шаг 2: создаём спрайты только ПОСЛЕ того как map не будет расти.
+        // Теперь адреса текстур стабильны — sf::Sprite безопасно хранит указатель.
+        customTileSprite.clear();
+        for (auto& [tid, tex] : customTileTextures) {
+            customTileSprite[tid] = sf::Sprite(tex);
+        }
+
         std::cout << "[OK] Загружено текстур кастомных тайлов: " << loaded << "\n";
     }
 
@@ -683,21 +738,7 @@ public:
     }
 
     void loadStartScene() {
-        // Всегда синхронизируем map.json → scenes/aethoria_city.json
-        // чтобы изменения из редактора (сущности, тайлы) отражались в движке
-        std::ifstream test("assets/map.json");
-        if (test.is_open()) {
-            test.close();
-            ensureScenesDir();
-            std::string target = SceneUtils::sceneFile("aethoria_city");
-            // Копируем map.json в scenes/ всегда — редактор мог его обновить
-            std::ifstream src("assets/map.json", std::ios::binary);
-            std::ofstream dst(target, std::ios::binary);
-            if (src && dst) {
-                dst << src.rdbuf();
-                std::cout << "[SceneManager] map.json → " << target << " (sync)\n";
-            }
-        }
+        // map.json больше не используется — редактор сохраняет прямо в assets/scenes/
         if (!sceneManager.loadDefault(entitySystem)) {
             buildMap();    // fallback если нет ни одного файла сцены
             spawnEnemies();
@@ -737,12 +778,8 @@ public:
                     questNotifyTimer  = 4.f;
                 }
             }
-            // Лут в инвентарь (новый Inventory)
-            auto loot = itemSystem.rollLoot(ev.enemyName, ev.enemyLevel);
-            for (auto& l : loot) {
-                itemSystem.giveToInventory(player.bag, l.itemId, l.count);
-            }
             // XP + gold от врага напрямую
+            // (Предметный лут кладётся в bag при подборе с земли — через spawnItemLoot)
             player.xp   += ev.xpReward;
             player.gold += ev.goldDrop;
             checkLevelUp();
@@ -984,6 +1021,124 @@ public:
         player.skills.push_back({"Fireball",  "Ranged fire attack",   30,  40, 1.5f, 0});
         player.skills.push_back({"Shield",    "Defense buff",         20,   0, 2.0f, 0});
         player.skills.push_back({"Heal",      "Restore HP",           40,   0, 3.0f, 0});
+
+        // SkillSystem instances (привязаны к def IDs из skills.json)
+        for (auto& [id, def] : skillSystem.allDefs()) {
+            SkillInstance si;
+            si.defId   = id;
+            si.unlocked = true;
+            si.level   = 1;
+            player.skillInstances.push_back(si);
+        }
+        // Fallback если skills.json не загружен — создаём базовые
+        if (player.skillInstances.empty()) {
+            for (const std::string& id : {"slash","fireball","shield","heal"}) {
+                SkillInstance si; si.defId = id; si.unlocked = true;
+                player.skillInstances.push_back(si);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // СИСТЕМА ЭКИПИРОВКИ
+    // ═══════════════════════════════════════════════════════════
+
+    // Пересчитать суммарные бонусы от всей надетой экипировки
+    void recalcEquipBonuses() {
+        player.equipBonuses.clear();
+        for (auto& [slot, itemId] : player.equipped) {
+            if (itemId.empty()) continue;
+            const ItemDef* def = itemSystem.get(itemId);
+            if (!def) continue;
+            for (auto& [k, v] : def->stats)
+                player.equipBonuses[k] += v;
+        }
+        // Применяем к базовым статам (пересчитываем maxHp/maxMp с бонусами)
+        float bonusHp  = player.equipBonuses.count("hp")  ? player.equipBonuses["hp"]  : 0.f;
+        float bonusMp  = player.equipBonuses.count("mp")  ? player.equipBonuses["mp"]  : 0.f;
+        // maxHp/maxMp = base + bonus (base у игрока фиксированный до добавления)
+        // Просто обновляем верхнюю планку — HP/MP не обрезаем до новых значений
+        // (базовое maxHp=100 хранится в player, бонусы отдельно)
+    }
+
+    // Надеть предмет из инвентаря (по индексу слота bag)
+    bool equipItem(int invSlotIdx) {
+        if (invSlotIdx < 0 || invSlotIdx >= (int)player.bag.slots.size()) return false;
+        const std::string& itemId = player.bag.slots[invSlotIdx].itemId;
+        const ItemDef* def = itemSystem.get(itemId);
+        if (!def) return false;
+        // Только надеваемые типы
+        if (def->type == "consumable" || def->type == "material" || def->type == "quest")
+            return false;
+
+        // ── Проверка ограничения по классу ─────────────────────
+        if (!def->canBeUsedBy(player.className)) {
+            floatingTexts.push_back({
+                player.pos + V2(0, -40),
+                "Только для: " + def->allowedClassesStr(),
+                2.5f, sf::Color(255, 80, 80), false
+            });
+            if (audioManager) audioManager->playSound("ui_click");
+            return false;
+        }
+
+        // Определяем слот
+        std::string slot = def->slot;
+        if (slot.empty()) {
+            // Автоопределение по типу
+            if      (def->type == "weapon")  slot = "main_hand";
+            else if (def->type == "armor")   slot = "chest";
+            else if (def->type == "helmet")  slot = "head";
+            else if (def->type == "boots")   slot = "legs";
+            else if (def->type == "ring")    slot = "ring1";
+            else if (def->type == "amulet")  slot = "neck";
+            else if (def->type == "shield")  slot = "off_hand";
+            else return false;
+        }
+
+        // Если слот занят — снимаем и возвращаем в инвентарь
+        auto it = player.equipped.find(slot);
+        if (it != player.equipped.end() && !it->second.empty()) {
+            std::string old = it->second;
+            player.equipped[slot] = "";
+            itemSystem.giveToInventory(player.bag, old, 1);
+        }
+
+        // Надеваем: убираем из инвентаря, ставим в слот
+        player.bag.slots[invSlotIdx].count--;
+        if (player.bag.slots[invSlotIdx].count <= 0)
+            player.bag.slots.erase(player.bag.slots.begin() + invSlotIdx);
+
+        player.equipped[slot] = itemId;
+        recalcEquipBonuses();
+
+        selectedInvSlot = -1;
+        if (audioManager) audioManager->playSound("ui_click");
+        floatingTexts.push_back({player.pos + V2(0,-30), def->name, 2.f, sf::Color(220,185,80), false});
+        return true;
+    }
+
+    // Снять предмет из слота экипировки
+    void unequipSlot(const std::string& slot) {
+        auto it = player.equipped.find(slot);
+        if (it == player.equipped.end() || it->second.empty()) return;
+        std::string itemId = it->second;
+        it->second = "";
+        itemSystem.giveToInventory(player.bag, itemId, 1);
+        recalcEquipBonuses();
+        if (audioManager) audioManager->playSound("ui_click");
+    }
+
+    // Итоговый стат с учётом экипировки
+    float getTotalStat(const std::string& key) const {
+        float bonus = 0.f;
+        auto it = player.equipBonuses.find(key);
+        if (it != player.equipBonuses.end()) bonus = it->second;
+        if (key == "damage")  return player.baseAtk + player.str * 2 + bonus;
+        if (key == "defense") return player.baseDef + player.vit + bonus;
+        if (key == "hp")      return player.maxHp + bonus;
+        if (key == "mp")      return player.maxMp + bonus;
+        return bonus;
     }
 
     void spawnEnemies(){
@@ -1026,7 +1181,18 @@ public:
                         e.stateMachine = AnimStateMachine(e.animPlayer, ename);
                     }
                 }
-                enemies.push_back(e);
+                // ── AI FSM инициализация ──────────────────────────────
+                e.ai.params.aggroRange    = e.boss ? 280.f : AGGRO_RANGE;
+                e.ai.params.deaggroRange  = DEAGGRO_RANGE;
+                e.ai.params.combatRange   = e.boss ? 60.f : 40.f;
+                e.ai.params.patrolSpeed   = e.speed * 0.55f;
+                e.ai.params.aggroSpeed    = e.speed;
+                e.ai.params.combatSpeed   = e.speed * 0.8f;
+                e.ai.params.attackCooldown = e.attackCD > 0 ? e.attackCD : 1.2f;
+                e.ai.params.isBoss        = e.boss;
+                e.ai.params.fleeAtLowHp   = false;
+                AISystem::initDefaultPatrol(e.ai, e.pos.x, e.pos.y, e.boss ? 96.f : 64.f);
+                enemies.push_back(std::move(e));
             }
             for (auto& en : enemies) {
                 EntityProperties ep;
@@ -1068,6 +1234,16 @@ public:
                     e.stateMachine = AnimStateMachine(e.animPlayer, entityName);
                 }
             }
+            // ── AI FSM инициализация ──────────────────────────────
+            e.ai.params.aggroRange    = e.boss ? 280.f : AGGRO_RANGE;
+            e.ai.params.deaggroRange  = DEAGGRO_RANGE;
+            e.ai.params.combatRange   = e.boss ? 60.f : 40.f;
+            e.ai.params.patrolSpeed   = e.speed * 0.55f;
+            e.ai.params.aggroSpeed    = e.speed;
+            e.ai.params.combatSpeed   = e.speed * 0.8f;
+            e.ai.params.attackCooldown = 1.2f;
+            e.ai.params.isBoss        = e.boss;
+            AISystem::initDefaultPatrol(e.ai, e.pos.x, e.pos.y, e.boss ? 96.f : 64.f);
             enemies.push_back(e);
         }
         for (auto& en : enemies) {
@@ -1321,7 +1497,7 @@ public:
                 if(player.hpPotions>0){player.hp=std::min(player.maxHp,player.hp+60.f);player.hpPotions--;spawnParticles(player.pos,ParticleT::HEAL,10);}break;
             case sf::Keyboard::Num8:
                 if(player.mpPotions>0){player.mp=std::min(player.maxMp,player.mp+50.f);player.mpPotions--;}break;
-            case sf::Keyboard::C:showStats=!showStats;break;
+            case sf::Keyboard::C:showCharacter=!showCharacter;break;
             case sf::Keyboard::Tab:showInventory=!showInventory;break;
             case sf::Keyboard::M:showMap=!showMap;break;
             case sf::Keyboard::E:tryInteract();break;
@@ -1366,6 +1542,86 @@ public:
             return;
         }
         sf::Vector2f wp=window.mapPixelToCoords(sf::Vector2i(mx,my),camera);
+
+        // ── Клик по инвентарю ────────────────────────────────────
+        if (showInventory) {
+            float px = 16.f, py = WINDOW_H - 340.f; // matches drawInventoryPanel
+            const float SZ = 48.f, GAP = 6.f;
+            float gridX = px + 12.f, gridY = py + 34.f;
+            const int COLS = 5;
+            // Всего предметов в bag
+            int totalItems = (int)player.bag.slots.size();
+            for (int i = 0; i < totalItems; i++) {
+                int col = i % COLS, row = i / COLS;
+                float sx = gridX + col * (SZ + GAP);
+                float sy = gridY + row * (SZ + GAP);
+                if (mx >= sx && mx <= sx+SZ && my >= sy && my <= sy+SZ) {
+                    if (selectedInvSlot == i) {
+                        // Повторный клик — надеваем/используем
+                        equipItem(i);
+                        selectedInvSlot = -1;
+                    } else {
+                        selectedInvSlot = i;
+                    }
+                    return;
+                }
+            }
+            // Клик по кнопке "Надеть" под сеткой предметов
+            if (selectedInvSlot >= 0 && selectedInvSlot < (int)player.bag.slots.size()) {
+                const ItemDef* def = itemSystem.get(player.bag.slots[selectedInvSlot].itemId);
+                bool canEquip = def && def->type != "consumable" && def->type != "material" && def->type != "quest";
+                if (canEquip) {
+                    // Вычисляем позицию кнопки (та же логика что в drawInventoryPanel)
+                    const int ROWS2 = 4;
+                    float infoY2 = gridY + ROWS2 * (SZ + GAP) + 4.f;
+                    // Пропускаем имя (16) + описание (14) + статы (12 каждый)
+                    infoY2 += 16.f; // имя
+                    if (!def->description.empty()) infoY2 += 14.f;
+                    for (auto& [k,v] : def->stats) if (v != 0.f) infoY2 += 12.f;
+                    float bx = px + 12, by = infoY2, bw = 100.f, bh = 22.f;
+                    if (mx >= bx && mx <= bx+bw && my >= by && my <= by+bh) {
+                        equipItem(selectedInvSlot);
+                        selectedInvSlot = -1;
+                        return;
+                    }
+                }
+            }
+            // Клик вне слотов — сбрасываем выделение
+            float panelX2 = px + 320.f, panelY2 = WINDOW_H - 16.f;
+            if (mx >= px && mx <= panelX2 && my >= py && my <= panelY2) {
+                selectedInvSlot = -1;
+                return;
+            }
+        }
+
+        // ── Клик по окну персонажа — снять вещь ─────────────────
+        if (showCharacter) {
+            const float CW = 620.f, CH = 520.f;
+            const float CX2 = WINDOW_W / 2.f - CW / 2.f;
+            const float CY2 = WINDOW_H / 2.f - CH / 2.f;
+            const float SS2 = 54.f, SG2 = 8.f;
+            const float LC2 = CX2 + 12.f;
+            const float RC2 = CX2 + CW - 12.f - SS2;
+
+            struct SlotPos { const char* slot; float x, y; };
+            SlotPos spos[] = {
+                {"main_hand", LC2, CY2 + 58.f},
+                {"ring1",     LC2, CY2 + 58.f + (SS2+SG2)},
+                {"ring2",     LC2, CY2 + 58.f + (SS2+SG2)*2},
+                {"legs",      LC2, CY2 + 58.f + (SS2+SG2)*3},
+                {"off_hand",  RC2, CY2 + 58.f},
+                {"head",      RC2, CY2 + 58.f + (SS2+SG2)},
+                {"chest",     RC2, CY2 + 58.f + (SS2+SG2)*2},
+                {"neck",      RC2, CY2 + 58.f + (SS2+SG2)*3},
+            };
+            for (auto& sp : spos) {
+                if (mx >= sp.x && mx <= sp.x+SS2 && my >= sp.y && my <= sp.y+SS2) {
+                    unequipSlot(sp.slot);
+                    return;
+                }
+            }
+        }
+
         for(auto& e:enemies){
             if(e.hp<=0) continue;
             if(dist({wp.x,wp.y},e.pos)<24.f){targetEnemy=&e;return;}
@@ -1442,6 +1698,9 @@ public:
     for(auto& s : player.skills)
         if(s.currentCooldown > 0) s.currentCooldown -= dt;
 
+    // SkillSystem cooldown update
+    skillSystem.update(player.skillInstances, dt);
+
     // Пассивная регенерация
     player.hp = std::min(player.maxHp, player.hp + 3.f * dt);
     player.mp = std::min(player.maxMp, player.mp + 2.f * dt);
@@ -1466,85 +1725,109 @@ public:
     for(auto& e : enemies){
         if(e.hp <= 0) continue;
         e.animTime += dt;
-        float dPlayer = dist(e.pos, player.pos);
 
-        switch(e.state){
-        case EnemyState::IDLE:
-        case EnemyState::PATROL:
-            if(dPlayer < AGGRO_RANGE || e.aggroedByHit){
-                e.state = EnemyState::AGGRO;
-                e.aggroedByHit = false;
-            }
-            else{
-                e.aiTimer -= dt;
-                if(e.aiTimer <= 0){
-                    e.aiTimer = 2.f + (float)(rand() % 3);
-                    e.patrolTarget = e.spawnPos + V2((rand()%160)-80.f, (rand()%160)-80.f);
-                    e.state = EnemyState::PATROL;
-                }
-                if(e.state == EnemyState::PATROL){
-                    V2 toDest = e.patrolTarget - e.pos;
-                    if(toDest.len() < 20.f){
-                        e.state  = EnemyState::IDLE;
-                        e.aiTimer = 1.f;
-                    } else {
-                        V2 move = toDest.norm() * e.speed * dt;
-                        e.pos = e.pos + move;
-                        if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+        // ── Статус-эффекты ────────────────────────────────────────
+        e.stunTimer  = 0.f;
+        e.slowFactor = 1.f;
+        float poisonDmg = 0.f;
+        for (auto it = e.statuses.begin(); it != e.statuses.end(); ) {
+            it->duration -= dt;
+            switch (it->type) {
+                case StatusType::STUN:
+                    e.stunTimer = std::max(e.stunTimer, it->duration);
+                    break;
+                case StatusType::SLOW:
+                    e.slowFactor = std::min(e.slowFactor, 1.f - it->potency);
+                    break;
+                case StatusType::POISON:
+                case StatusType::BURN:
+                    it->tickTimer -= dt;
+                    if (it->tickTimer <= 0.f) {
+                        it->tickTimer = 0.5f;
+                        poisonDmg += it->potency * 0.5f;
                     }
-                }
+                    break;
+                default: break;
             }
-            break;
+            if (it->duration <= 0.f) it = e.statuses.erase(it);
+            else ++it;
+        }
+        if (poisonDmg > 0.f) {
+            e.hp -= poisonDmg;
+            floatingTexts.push_back({e.pos + V2(0, -16),
+                "-" + std::to_string((int)poisonDmg), 1.f,
+                sf::Color(80,200,60), false});
+            if (e.hp <= 0.f && !e.deathProcessed) { e.deathProcessed=true; onEnemyKilled(e); }
+        }
+        if (e.hp <= 0) continue;
 
-        case EnemyState::AGGRO:{
-            V2 toPlayer = player.pos - e.pos;
-            float d = toPlayer.len();
-            if(d < DEAGGRO_RANGE){
-                if(d > 40.f){
-                    V2 move = toPlayer.norm() * e.speed * dt;
-                    e.pos = e.pos + move;
-                    if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
-                }
-                else e.state = EnemyState::COMBAT;
-            } else e.state = EnemyState::PATROL;
-            break;}
+        // ── AISystem update ───────────────────────────────────────
+        if (!e.isStunned()) {
+            // Применяем замедление к скоростям
+            float savedAggroSpeed  = e.ai.params.aggroSpeed;
+            float savedPatrolSpeed = e.ai.params.patrolSpeed;
+            float savedCombatSpeed = e.ai.params.combatSpeed;
+            e.ai.params.aggroSpeed  *= e.slowFactor;
+            e.ai.params.patrolSpeed *= e.slowFactor;
+            e.ai.params.combatSpeed *= e.slowFactor;
 
-        case EnemyState::COMBAT:{
-            float d = dist(e.pos, player.pos);
-            if(d > DEAGGRO_RANGE) e.state = EnemyState::PATROL;
-            else {
-                // ИСПРАВЛЕНИЕ: враг смотрит на игрока даже в COMBAT
-                if(e.animPlayer)
-                    e.animPlayer->updateFacingFromVelocity(player.pos.x - e.pos.x);
+            aiSystem.update(e.ai, e.pos.x, e.pos.y,
+                            player.pos.x, player.pos.y,
+                            e.hp, e.maxHp, dt);
 
-                e.currentAttackCD -= dt;
-                if(e.currentAttackCD <= 0){
-                    player.hp -= e.damage * 0.8f;
-                    e.currentAttackCD = 1.2f;
-                    spawnParticles(player.pos, ParticleT::BLOOD, 8);
-                }
+            e.ai.params.aggroSpeed  = savedAggroSpeed;
+            e.ai.params.patrolSpeed = savedPatrolSpeed;
+            e.ai.params.combatSpeed = savedCombatSpeed;
+
+            // Применяем движение
+            e.pos.x += e.ai.velX * dt;
+            e.pos.y += e.ai.velY * dt;
+
+            // Проверяем walkable
+            int tx = (int)(e.pos.x / TILE), ty = (int)(e.pos.y / TILE);
+            if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H ||
+                !worldMap[ty][tx].walkable) {
+                e.pos.x -= e.ai.velX * dt;
+                e.pos.y -= e.ai.velY * dt;
             }
-            break;}
 
-        case EnemyState::RETURN:
-            if(dist(e.pos, e.spawnPos) < 10.f){
-                e.pos   = e.spawnPos;
-                e.state = EnemyState::IDLE;
-            } else {
-                V2 move = (e.spawnPos - e.pos).norm() * e.speed * dt;
-                e.pos = e.pos + move;
-                if(e.animPlayer) e.animPlayer->updateFacingFromVelocity(move.x);
+            // AI атака → наносим урон игроку
+            if (e.ai.shouldAttack) {
+                int dmg = std::max(1, (int)(e.damage * (0.8f + (rand()%40)*0.01f)));
+                // Митигация урона базовой защитой
+                dmg = std::max(1, dmg - player.baseDef / 2);
+                player.hp -= (float)dmg;
+                player.hp  = std::max(0.f, player.hp);
+                spawnParticles(player.pos, ParticleT::BLOOD, 6);
+                floatingTexts.push_back({player.pos + V2(0,-30),
+                    "-" + std::to_string(dmg), 1.2f, sf::Color(220,80,60), false});
+                if (audioManager) audioManager->playSound("damage");
             }
-            break;
 
-        default: break;
+            // Синхронизируем EnemyState из AIState (для анимации)
+            switch (e.ai.state) {
+                case AIState::IDLE:    e.state = EnemyState::IDLE;    break;
+                case AIState::PATROL:  e.state = EnemyState::PATROL;  break;
+                case AIState::AGGRO:   e.state = EnemyState::AGGRO;   break;
+                case AIState::COMBAT:  e.state = EnemyState::COMBAT;  break;
+                case AIState::RETURN:  e.state = EnemyState::RETURN;  break;
+                default: break;
+            }
         }
 
+        // Агрро от попадания (принудительно переключаем AI)
+        if (e.aggroedByHit && e.ai.state != AIState::DEAD) {
+            AISystem::forceAggro(e.ai);
+            e.aggroedByHit = false;
+        }
+
+        // ── Анимации через StateMachine ───────────────────────────
         if(e.animPlayer){
             bool isMoving = (e.state == EnemyState::PATROL ||
                              e.state == EnemyState::AGGRO  ||
                              e.state == EnemyState::RETURN);
-            // stateMachine: state + facing уже обновлены выше в логике движения
+            if (e.ai.velX != 0.f || e.ai.velY != 0.f)
+                e.stateMachine.updateFacingFromVelocity(e.ai.velX);
             e.stateMachine.setState(isMoving ? AnimState::WALK : AnimState::IDLE);
             e.stateMachine.update(dt);
             e.stateMachine.setPosition(e.pos.x, e.pos.y);
@@ -1574,14 +1857,111 @@ public:
         if(idx<0||idx>=(int)player.skills.size()) return;
         auto& skill=player.skills[idx];
         if(skill.currentCooldown>0||player.mp<skill.manaCost) return;
-        player.mp-=skill.manaCost; skill.currentCooldown=skill.cooldown;
-        if(targetEnemy&&targetEnemy->hp>0){
-            int dmg=skill.damage+(rand()%10)-5;
-            targetEnemy->hp-=dmg;
-            targetEnemy->aggroedByHit=true;
-            floatingTexts.push_back({targetEnemy->pos, std::to_string(dmg), 1.5f, sf::Color(200,50,50), false});
-            spawnParticles(targetEnemy->pos, ParticleT::MAGIC, 5);
+        player.mp-=skill.manaCost;
+        skill.currentCooldown=skill.cooldown;
+
+        // ── Пробуем через SkillSystem (если скилл там зарегистрирован) ──
+        // Маппинг legacy skill names → skillSystem IDs
+        static const std::map<std::string,std::string> skillIdMap = {
+            {"Slash","slash"},{"Fireball","fireball"},
+            {"Shield","shield"},{"Heal","heal"}
+        };
+        auto sit = skillIdMap.find(skill.name);
+        if (sit != skillIdMap.end()) {
+            if (skill.name == "Heal") {
+                // Особая обработка хила
+                float healAmt = 20.f + player.intel * 2.f + player.level * 5.f;
+                player.hp = std::min(player.maxHp, player.hp + healAmt);
+                spawnParticles(player.pos, ParticleT::HEAL, 12);
+                floatingTexts.push_back({player.pos+V2(0,-40),
+                    "+" + std::to_string((int)healAmt) + " HP",
+                    2.f, sf::Color(80,240,100), false});
+                if (audioManager) audioManager->playSound("heal");
+                player.stateMachine.setAttack();
+                return;
+            }
+            if (skill.name == "Shield") {
+                player.baseDef += 5;
+                floatingTexts.push_back({player.pos+V2(0,-40),
+                    "Щит! +5 DEF", 2.f, sf::Color(100,180,255), false});
+                // Убираем через 4 сек (простая версия)
+                spawnParticles(player.pos, ParticleT::MAGIC, 8);
+                player.stateMachine.setAttack();
+                return;
+            }
+
+            // Атакующие скиллы
+            if (targetEnemy && targetEnemy->hp > 0) {
+                CasterStats cs;
+                cs.STR = (float)player.str; cs.DEX = (float)player.agi;
+                cs.INT = (float)player.intel; cs.VIT = (float)player.vit;
+                cs.level = (float)player.level;
+                cs.critChance = 0.05f + player.agi * 0.005f;
+
+                auto result = skillSystem.useById(player.skillInstances, sit->second, cs, player.mp);
+                // Если skillSystem не знает этот скилл — fallback
+                if (!result.success) {
+                    int fdmg = skill.damage + player.str * 2 + player.level * 2 + rand()%10 - 5;
+                    result.success = true; result.damage = (float)fdmg;
+                    result.isCrit  = (rand()%100 < 5);
+                }
+
+                int dmg = result.damage > 0 ? (int)result.damage
+                                            : (skill.damage + rand()%10 - 5);
+                // Бонус к урону от уровня
+                dmg += player.level * 2;
+                if (result.isCrit) dmg = (int)(dmg * 1.5f);
+
+                targetEnemy->hp -= (float)dmg;
+                targetEnemy->aggroedByHit = true;
+                AISystem::forceAggro(targetEnemy->ai);
+
+                // Применяем эффекты из SkillSystem
+                for (auto& ef : result.appliedEffects) {
+                    if (ef.type == "stun")
+                        targetEnemy->applyStatus(StatusType::STUN, ef.duration, 0.f);
+                    else if (ef.type == "poison")
+                        targetEnemy->applyStatus(StatusType::POISON, ef.duration, ef.potency);
+                    else if (ef.type == "slow")
+                        targetEnemy->applyStatus(StatusType::SLOW, ef.duration, ef.potency);
+                    else if (ef.type == "burn")
+                        targetEnemy->applyStatus(StatusType::BURN, ef.duration, ef.potency);
+                }
+
+                // Визуал
+                sf::Color dmgCol = result.isCrit ? sf::Color(255,200,30)
+                    : (skill.name=="Fireball" ? sf::Color(255,120,40) : sf::Color(200,50,50));
+                std::string dmgStr = (result.isCrit ? "КРИТ! " : "") + std::to_string(dmg);
+                floatingTexts.push_back({targetEnemy->pos+V2(0,-30),
+                    dmgStr, 1.8f, dmgCol, result.isCrit});
+                spawnParticles(targetEnemy->pos,
+                    skill.name=="Fireball" ? ParticleT::MAGIC : ParticleT::BLOOD, 8);
+
+                // Звук
+                if (audioManager) {
+                    if      (skill.name=="Fireball") audioManager->playSound("fireball");
+                    else if (result.isCrit)          audioManager->playSound("critical");
+                    else                             audioManager->playSound("slash");
+                }
+
+                // EventBus
+                SkillUsedEvent sv;
+                sv.skillId = sit->second; sv.casterId = "player";
+                sv.targetX = targetEnemy->pos.x; sv.targetY = targetEnemy->pos.y;
+                sv.damage = dmg;
+                eventBus.emit(sv);
+            }
+        } else {
+            // Legacy fallback
+            if(targetEnemy&&targetEnemy->hp>0){
+                int dmg=skill.damage+(rand()%10)-5;
+                targetEnemy->hp-=dmg;
+                targetEnemy->aggroedByHit=true;
+                floatingTexts.push_back({targetEnemy->pos, std::to_string(dmg), 1.5f, sf::Color(200,50,50), false});
+                spawnParticles(targetEnemy->pos, ParticleT::MAGIC, 5);
+            }
         }
+        player.stateMachine.setAttack();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -1629,8 +2009,9 @@ public:
         // ── 4. Level-up ───────────────────────────────────────────
         checkLevelUp();
 
-        // ── 5. Этап 3: Лут ────────────────────────────────────────
-        spawnLoot(e.pos, e.level, e.boss);
+        // ── 5. Этап 3: Лут (золото + предметы из ItemSystem) ─────
+        spawnLoot(e.pos, e.level, e.boss);              // золото на земле
+        spawnItemLoot(e.pos, e.name, e.level, e.boss);  // предметы на земле
     }
 
     void checkLevelUp() {
@@ -1669,15 +2050,12 @@ public:
     }
 
     // ── Этап 3: Лут ───────────────────────────────────────────
+    // itemId хранится в LootDrop::name когда isGold==false
     void spawnLoot(V2 pos, int enemyLevel, bool boss) {
-        static const char* commonItems[]  = {"Меч", "Лук", "Кинжал", "Топор", "Посох"};
-        static const char* rareItems[]    = {"Клинок теней", "Лунный лук", "Реликвия"};
-        static const char* epicItems[]    = {"Меч Бездны", "Корона Хаоса", "Камень душ"};
-
-        // Золото — всегда
+        // Золото — всегда (визуальный пикап, в bag не кладём — золото в player.gold)
         {
             LootDrop g;
-            g.pos     = pos + V2((rand()%24)-12, (rand()%24)-12);
+            g.pos     = pos + V2((float)(rand()%24)-12.f, (float)(rand()%24)-12.f);
             g.isGold  = true;
             g.goldAmt = (5 + enemyLevel * 3) * (boss ? 5 : 1) + rand() % 10;
             g.name    = std::to_string(g.goldAmt) + "g";
@@ -1685,36 +2063,56 @@ public:
             g.life    = 30.f;
             lootDrops.push_back(g);
         }
+    }
 
-        // Предмет — по шансу
-        int roll = rand() % 100;
-        int threshold = boss ? 10 : (50 - enemyLevel * 3);  // боссы почти гарантируют дроп
-        threshold = std::max(threshold, 5);
-        if (roll >= threshold) return;
+    // Спавн предметного лута из ItemSystem
+    void spawnItemLoot(V2 pos, const std::string& enemyType, int enemyLevel, bool boss) {
+        auto drops = itemSystem.rollLoot(enemyType, enemyLevel);
 
-        LootDrop d;
-        d.pos    = pos + V2((rand()%32)-16, (rand()%32)-16);
-        d.isGold = false;
-        d.life   = 30.f;
+        // Если дроп-таблицы нет — генерируем по шансу из встроенных предметов
+        if (drops.empty()) {
+            int roll = rand() % 100;
+            int threshold = boss ? 10 : std::max(5, 50 - enemyLevel * 3);
+            if (roll < threshold) {
+                std::vector<std::string> byRarity[4];
+                for (auto& [id, def] : itemSystem.all()) {
+                    if (def.type == "consumable" || def.type == "material" || def.type == "quest")
+                        byRarity[0].push_back(id);
+                    else
+                        byRarity[std::min(3, (int)def.rarity)].push_back(id);
+                }
+                int rar = 0;
+                if (boss || roll < 5)                  rar = 3;
+                else if (roll < 15 || enemyLevel >= 3) rar = 2;
+                else if (roll < 30)                    rar = 1;
 
-        if (boss || roll < 5) {
-            d.rarity = 3;
-            d.name   = epicItems[rand() % 3];
-        } else if (roll < 15 || enemyLevel >= 3) {
-            d.rarity = 2;
-            d.name   = rareItems[rand() % 3];
-        } else if (roll < 30) {
-            d.rarity = 1;
-            d.name   = commonItems[rand() % 5];
-        } else {
-            d.rarity = 0;
-            d.name   = commonItems[rand() % 5];
+                for (int r = rar; r >= 0; r--) {
+                    if (!byRarity[r].empty()) {
+                        const std::string& id = byRarity[r][rand() % byRarity[r].size()];
+                        drops.push_back(ItemStack(id, 1));
+                        break;
+                    }
+                }
+            }
         }
-        lootDrops.push_back(d);
+
+        for (auto& stack : drops) {
+            if (stack.itemId.empty()) continue;
+            const ItemDef* def = itemSystem.get(stack.itemId);
+            if (!def) continue;
+
+            LootDrop d;
+            d.pos     = pos + V2((float)(rand()%32)-16.f, (float)(rand()%32)-16.f);
+            d.isGold  = false;
+            d.name    = stack.itemId;  // ВАЖНО: itemId, не display-name
+            d.rarity  = (int)def->rarity;
+            d.life    = 30.f;
+            d.goldAmt = stack.count;   // переиспользуем поле для кол-ва
+            lootDrops.push_back(d);
+        }
     }
 
     void updateLoot(float dt) {
-        // Подбор
         for (auto& l : lootDrops) {
             if (l.pickedUp) continue;
             l.life -= dt;
@@ -1727,10 +2125,25 @@ public:
                     floatingTexts.push_back({player.pos+V2(0,-24),
                         "+"+std::to_string(l.goldAmt)+"g", 1.5f, sf::Color(255,215,0), false});
                 } else {
-                    player.inventory.push_back({l.name, "drop", l.rarity, 5+l.rarity*5, 0, 0});
+                    // l.name == itemId из ItemSystem
+                    int qty = l.goldAmt > 0 ? l.goldAmt : 1;
+                    bool added = itemSystem.giveToInventory(player.bag, l.name, qty);
+                    const ItemDef* def = itemSystem.get(l.name);
+                    std::string displayName = def ? def->name : l.name;
+                    std::string pickupMsg = (qty > 1)
+                        ? displayName + " x" + std::to_string(qty)
+                        : displayName;
+                    if (!added) pickupMsg = "Inv full!";
                     floatingTexts.push_back({player.pos+V2(0,-24),
-                        l.name, 1.5f, rarityColor(l.rarity), false});
-                    spawnParticles(player.pos, ParticleT::MAGIC, 6);
+                        pickupMsg, 1.8f, rarityColor(l.rarity), false});
+                    if (added) {
+                        spawnParticles(player.pos, ParticleT::MAGIC, 6);
+                        ItemPickupEvent ipev;
+                        ipev.itemId   = l.name;
+                        ipev.itemName = displayName;
+                        ipev.count    = qty;
+                        eventBus.enqueue(ipev);
+                    }
                 }
             }
         }
@@ -1773,7 +2186,20 @@ public:
     }
 
     void tryLogin(){ gameState=GameState::CHARACTER_SELECT; }
-    void enterWorld(){ gameState=GameState::PLAYING; }
+    void enterWorld() {
+        // Применяем выбранный класс и имя персонажа
+        const char* classNames[] = {"Warrior", "Mage", "Rogue", "Paladin"};
+        int ci = charSlots[selectedSlot].classIdx;
+        if (ci >= 0 && ci < 4) player.className = classNames[ci];
+        if (!charSlots[selectedSlot].name.empty())
+            player.name = charSlots[selectedSlot].name;
+        // Обновляем entitySystem
+        if (auto* e = entitySystem.getEntity(playerEntityId)) {
+            e->name = player.name;
+            e->props.setStr("class", player.className);
+        }
+        gameState = GameState::PLAYING;
+    }
 
     // =========================================================
     void render(){
@@ -1797,8 +2223,8 @@ public:
         drawHUD();
         drawSceneTransition();
         if(dialogTimer>0.f) drawDialog();
-        if(showStats)     drawStatsPanel();
         if(showInventory) drawInventoryPanel();
+        if(showCharacter) drawCharacterPanel();
         if(showMap)       drawMinimap();
         window.display();
     }
@@ -1816,6 +2242,27 @@ public:
                 auto& t = worldMap[y][x];
                 float wx=x*TILE, wy=y*TILE;
                 tile.setPosition(wx,wy);
+
+                // ── Кастомный тайл (текстура из custom_tiles.json) ───────
+                // Проверяем ДО switch по типу — кастомные не нужно конвертировать
+                if (!t.tileId.empty()) {
+                    auto cit = customTileSprite.find(t.tileId);
+                    if (cit != customTileSprite.end()) {
+                        auto& sp = cit->second;
+                        auto tr  = sp.getTextureRect();
+                        sp.setPosition(wx, wy);
+                        sp.setScale(
+                            (float)TILE / std::max(1, tr.width),
+                            (float)TILE / std::max(1, tr.height));
+                        window.draw(sp);
+                    } else {
+                        // Текстура не загрузилась — рисуем цвет-заглушку из custom_tiles.json
+                        tile.setFillColor(t.color);
+                        tile.setOutlineThickness(0);
+                        window.draw(tile);
+                    }
+                    continue;  // переходим к следующему тайлу
+                }
 
                 // Преобразование SceneTileType в TileType для визуализации
                 TileType tt;
@@ -1905,21 +2352,8 @@ public:
                     tile.setFillColor(sf::Color(120,115,105)); window.draw(tile);
                     break;
                 default:
-                    // FIX: кастомный тайл по tileId (поле SceneTile из scene_system.hpp)
-                    if (!t.tileId.empty()) {
-                        auto it = customTileSprite.find(t.tileId);
-                        if (it != customTileSprite.end()) {
-                            it->second.setPosition(wx, wy);
-                            it->second.setScale(
-                                (float)TILE / std::max(1, it->second.getTextureRect().width),
-                                (float)TILE / std::max(1, it->second.getTextureRect().height));
-                            window.draw(it->second);
-                        } else {
-                            tile.setFillColor(t.color); window.draw(tile);
-                        }
-                    } else {
-                        tile.setFillColor(t.color); window.draw(tile);
-                    }
+                    // Неизвестный встроенный тип — цвет из SceneTile
+                    tile.setFillColor(t.color); window.draw(tile);
                     break;
                 }
             }
@@ -2282,6 +2716,39 @@ public:
                 sel.setOutlineThickness(2);
                 window.draw(sel);
             }
+
+            // ── Иконки статус-эффектов над врагом ────────────────
+            if (!e.statuses.empty()) {
+                float ix = e.pos.x - e.statuses.size() * 8.f;
+                float iy = e.pos.y - r - 24.f;
+                for (auto& st : e.statuses) {
+                    sf::CircleShape ic(5, 6);
+                    ic.setOrigin(5, 5);
+                    ic.setPosition(ix, iy);
+                    switch (st.type) {
+                        case StatusType::POISON: ic.setFillColor(sf::Color(60,200,60)); break;
+                        case StatusType::STUN:   ic.setFillColor(sf::Color(240,220,40)); break;
+                        case StatusType::SLOW:   ic.setFillColor(sf::Color(80,160,220)); break;
+                        case StatusType::BURN:   ic.setFillColor(sf::Color(255,120,40)); break;
+                    }
+                    ic.setOutlineColor(sf::Color(0,0,0,120));
+                    ic.setOutlineThickness(1.f);
+                    window.draw(ic);
+                    ix += 14.f;
+                }
+            }
+
+            // ── Имя врага (боссы и targeted) ─────────────────────
+            if (fontLoaded && (e.boss || targeted)) {
+                sf::Text nm; nm.setFont(font);
+                nm.setString(U(e.name + (e.boss ? " [BOSS]" : "")));
+                nm.setCharacterSize(e.boss ? 13 : 11);
+                nm.setFillColor(e.boss ? sf::Color(255,160,40,220) : sf::Color(220,200,200,180));
+                auto nb = nm.getLocalBounds();
+                nm.setOrigin(nb.width/2, nb.height);
+                nm.setPosition(e.pos.x, e.pos.y - r - 20.f);
+                window.draw(nm);
+            }
         }
     }
 
@@ -2311,22 +2778,159 @@ public:
 
     void drawHUD(){
         if(!fontLoaded) return;
-        drawWorldBar(window, 20,20,200,20,player.hp/player.maxHp,sf::Color(200,50,50));
-        drawWorldBar(window, 20,50,200,20,player.mp/player.maxMp,sf::Color(50,100,200));
-        sf::Text levelTxt; levelTxt.setFont(font); levelTxt.setString(U("Lvl "+std::to_string(player.level)));
-        levelTxt.setCharacterSize(16); levelTxt.setFillColor(sf::Color(200,200,100));
-        levelTxt.setPosition(20,85);
-        window.draw(levelTxt);
 
-        // XP bar
-        if (player.xpNext > 0) {
-            drawWorldBar(window, 20, 108, 200, 8,
-                (float)player.xp / player.xpNext, sf::Color(80, 180, 255));
+        // ── HP / MP бары ─────────────────────────────────────────
+        // Фон
+        drawRoundedRect(window, 16, 16, 220, 80,
+            sf::Color(15, 10, 28, 200), sf::Color(80, 60, 120), 1);
+
+        // HP бар
+        drawWorldBar(window, 26, 24, 200, 18, player.hp/player.maxHp, sf::Color(200,50,50));
+        {
+            sf::Text t; t.setFont(font);
+            t.setString(U("HP  " + std::to_string((int)player.hp) + "/" + std::to_string((int)player.maxHp)));
+            t.setCharacterSize(12); t.setFillColor(sf::Color(240,200,200));
+            t.setPosition(28, 26); window.draw(t);
+        }
+        // MP бар
+        drawWorldBar(window, 26, 50, 200, 18, player.mp/player.maxMp, sf::Color(50,100,200));
+        {
+            sf::Text t; t.setFont(font);
+            t.setString(U("MP  " + std::to_string((int)player.mp) + "/" + std::to_string((int)player.maxMp)));
+            t.setCharacterSize(12); t.setFillColor(sf::Color(200,210,240));
+            t.setPosition(28, 52); window.draw(t);
+        }
+        // XP бар
+        drawWorldBar(window, 26, 74, 200, 8,
+            player.xpNext>0 ? (float)player.xp/player.xpNext : 0.f, sf::Color(80,180,255));
+
+        // Level + Gold
+        sf::Text lvlTxt; lvlTxt.setFont(font);
+        lvlTxt.setString(U("Lv." + std::to_string(player.level) +
+                           "   +" + std::to_string(player.xp) + "xp"));
+        lvlTxt.setCharacterSize(11); lvlTxt.setFillColor(sf::Color(160,200,120));
+        lvlTxt.setPosition(26, 85); window.draw(lvlTxt);
+
+        // ── Панель скиллов (нижняя центральная) ──────────────────
+        const int NSLOTS = (int)player.skills.size();
+        const float SLOT_SZ = 52.f, SLOT_GAP = 6.f;
+        float totalW = NSLOTS * SLOT_SZ + (NSLOTS - 1) * SLOT_GAP;
+        float barX = (WINDOW_W - totalW) / 2.f;
+        float barY = WINDOW_H - SLOT_SZ - 24.f;
+
+        // Фон панели
+        drawRoundedRect(window, barX - 10, barY - 8, totalW + 20, SLOT_SZ + 16,
+            sf::Color(15, 10, 28, 200), sf::Color(80, 60, 120), 1);
+
+        for (int i = 0; i < NSLOTS; i++) {
+            auto& sk = player.skills[i];
+            float sx = barX + i * (SLOT_SZ + SLOT_GAP);
+            bool onCD = sk.currentCooldown > 0;
+            bool noMana = player.mp < sk.manaCost;
+
+            // Фон слота
+            sf::RectangleShape slotBg({SLOT_SZ, SLOT_SZ});
+            slotBg.setPosition(sx, barY);
+            slotBg.setFillColor(sf::Color(25, 18, 42));
+            slotBg.setOutlineColor(onCD || noMana ? sf::Color(60,50,80) : sf::Color(140,100,200));
+            slotBg.setOutlineThickness(2.f);
+            window.draw(slotBg);
+
+            // Имя скилла
+            sf::Text nm; nm.setFont(font);
+            nm.setString(U(sk.name.size()>5 ? sk.name.substr(0,5) : sk.name));
+            nm.setCharacterSize(11); nm.setFillColor(sf::Color(200,180,240));
+            nm.setStyle(sf::Text::Bold);
+            auto nb = nm.getLocalBounds();
+            nm.setOrigin(nb.width/2, 0);
+            nm.setPosition(sx + SLOT_SZ/2, barY + 4);
+            window.draw(nm);
+
+            // Мана и кулдаун текст
+            sf::Text sub; sub.setFont(font);
+            sub.setString(U(std::to_string(sk.manaCost) + "mp"));
+            sub.setCharacterSize(10);
+            sub.setFillColor(noMana ? sf::Color(160,80,80) : sf::Color(100,140,220));
+            auto sb = sub.getLocalBounds();
+            sub.setOrigin(sb.width/2, 0);
+            sub.setPosition(sx + SLOT_SZ/2, barY + 22);
+            window.draw(sub);
+
+            // Кулдаун оверлей
+            if (onCD) {
+                float cdPct = sk.currentCooldown / sk.cooldown;
+                sf::RectangleShape cdBar({SLOT_SZ, SLOT_SZ * cdPct});
+                cdBar.setPosition(sx, barY + SLOT_SZ * (1.f - cdPct));
+                cdBar.setFillColor(sf::Color(0, 0, 0, 150));
+                window.draw(cdBar);
+
+                sf::Text cdTxt; cdTxt.setFont(font);
+                cdTxt.setString(std::to_string((int)std::ceil(sk.currentCooldown)));
+                cdTxt.setCharacterSize(18); cdTxt.setStyle(sf::Text::Bold);
+                cdTxt.setFillColor(sf::Color(220, 200, 80));
+                auto ct = cdTxt.getLocalBounds();
+                cdTxt.setOrigin(ct.width/2, ct.height/2);
+                cdTxt.setPosition(sx + SLOT_SZ/2, barY + SLOT_SZ/2);
+                window.draw(cdTxt);
+            }
+
+            // Хоткей [1-4]
+            sf::Text hk; hk.setFont(font);
+            hk.setString("[" + std::to_string(i+1) + "]");
+            hk.setCharacterSize(10); hk.setFillColor(sf::Color(120, 110, 150));
+            hk.setPosition(sx + 3, barY + SLOT_SZ - 13);
+            window.draw(hk);
         }
 
-        // ── Этап 1: Активные квесты ───────────────────────────────
+        // ── Target frame ─────────────────────────────────────────
+        if (targetEnemy && targetEnemy->hp > 0) {
+            float tfX = WINDOW_W - 230.f, tfY = 16.f;
+            drawRoundedRect(window, tfX, tfY, 214, 56,
+                sf::Color(15, 10, 28, 200), sf::Color(200,60,60), 1);
+            sf::Text tnm; tnm.setFont(font);
+            std::string tname = targetEnemy->name + " Lv." + std::to_string(targetEnemy->level);
+            if (targetEnemy->boss) tname += " [BOSS]";
+            tnm.setString(U(tname));
+            tnm.setCharacterSize(13); tnm.setFillColor(sf::Color(240, 180, 180));
+            tnm.setPosition(tfX + 10, tfY + 8);
+            window.draw(tnm);
+            drawWorldBar(window, tfX + 10, tfY + 30, 194, 14,
+                targetEnemy->hp / targetEnemy->maxHp,
+                targetEnemy->boss ? sf::Color(255,120,0) : sf::Color(200,50,50));
+            sf::Text thp; thp.setFont(font);
+            thp.setString(U(std::to_string((int)targetEnemy->hp) + " / " +
+                            std::to_string((int)targetEnemy->maxHp)));
+            thp.setCharacterSize(11); thp.setFillColor(sf::Color(220,180,180));
+            thp.setPosition(tfX + 12, tfY + 31);
+            window.draw(thp);
+
+            // Статус-эффекты цели
+            float stX = tfX + 10; float stY = tfY + 48;
+            for (auto& st : targetEnemy->statuses) {
+                sf::Color sc; std::string sl;
+                switch (st.type) {
+                    case StatusType::POISON: sc=sf::Color(60,200,60);  sl="ЯД";   break;
+                    case StatusType::STUN:   sc=sf::Color(240,220,40); sl="СТАН"; break;
+                    case StatusType::SLOW:   sc=sf::Color(80,160,220); sl="СЛО";  break;
+                    case StatusType::BURN:   sc=sf::Color(255,120,40); sl="ОГН";  break;
+                }
+                sf::RectangleShape sb({28.f, 14.f});
+                sb.setPosition(stX, stY);
+                sb.setFillColor(sf::Color(sc.r/3, sc.g/3, sc.b/3, 200));
+                sb.setOutlineColor(sc); sb.setOutlineThickness(1.f);
+                window.draw(sb);
+                sf::Text st2; st2.setFont(font);
+                st2.setString(sl); st2.setCharacterSize(8);
+                st2.setFillColor(sc);
+                st2.setPosition(stX + 2, stY + 2);
+                window.draw(st2);
+                stX += 32.f;
+            }
+        }
+
+        // ── Активные квесты ───────────────────────────────────────
         auto activeQs = questSystem.getActive();
-        float qy = 130.f;
+        float qy = 110.f;
         for (auto* q : activeQs) {
             sf::Text qt; qt.setFont(font);
             qt.setString(U("● " + q->name));
@@ -2342,11 +2946,11 @@ public:
             }
         }
 
-        // ── Квест-уведомление (всплывает при выполнении/принятии) ──
+        // ── Квест-уведомление ─────────────────────────────────────
         if (questNotifyTimer > 0.f && !questNotification.empty()) {
             float alpha = std::min(1.f, questNotifyTimer / 1.5f);
-            sf::RectangleShape bg({420, 56});
-            bg.setPosition(WINDOW_W/2 - 210, 20);
+            sf::RectangleShape bg({440, 56});
+            bg.setPosition(WINDOW_W/2 - 220, 20);
             bg.setFillColor(sf::Color(20, 40, 20, (uint8_t)(200*alpha)));
             bg.setOutlineColor(sf::Color(80, 200, 80, (uint8_t)(255*alpha)));
             bg.setOutlineThickness(1.5f);
@@ -2361,33 +2965,625 @@ public:
             window.draw(nt);
         }
 
-        // Kills & gold (мини-строка)
-        sf::Text statsLine; statsLine.setFont(font);
-        statsLine.setString(U("Kills:" + std::to_string(player.kills) +
-                             "  Gold:" + std::to_string(player.gold)));
-        statsLine.setCharacterSize(12); statsLine.setFillColor(sf::Color(140,130,160));
-        statsLine.setPosition(20, WINDOW_H - 20);
-        window.draw(statsLine);
+        // ── Подсказки управления (нижний левый) ──────────────────
+        sf::Text hint; hint.setFont(font);
+        hint.setString(U("[C] Персонаж  [Tab] Инв  [M] Карта  [E] Взаим  [7][8] Зелья"));
+        hint.setCharacterSize(11); hint.setFillColor(sf::Color(80, 70, 100));
+        hint.setPosition(16, WINDOW_H - 16);
+        window.draw(hint);
     }
 
     void drawStatsPanel(){
         if(!fontLoaded) return;
-        drawRoundedRect(window,WINDOW_W-280,20,260,300,sf::Color(30,20,40),sf::Color(100,80,150),2);
-        sf::Text title; title.setFont(font); title.setString("Stats");
-        title.setCharacterSize(18); title.setFillColor(sf::Color(200,200,100));
-        title.setPosition(WINDOW_W-270,30); window.draw(title);
+        float px = WINDOW_W - 290.f, py = 16.f, pw = 274.f, ph = 380.f;
+        drawRoundedRect(window, px, py, pw, ph,
+            sf::Color(20, 12, 35, 230), sf::Color(120, 80, 180), 2);
+
+        sf::Text title; title.setFont(font);
+        title.setString(U("[ " + player.name + " ]"));
+        title.setCharacterSize(16); title.setStyle(sf::Text::Bold);
+        title.setFillColor(sf::Color(220, 185, 80));
+        auto tb = title.getLocalBounds();
+        title.setOrigin(tb.width/2, 0);
+        title.setPosition(px + pw/2, py + 10);
+        window.draw(title);
+
+        sf::Text cls; cls.setFont(font);
+        cls.setString(U(player.className + " — Уровень " + std::to_string(player.level)));
+        cls.setCharacterSize(13); cls.setFillColor(sf::Color(160, 140, 200));
+        auto cb = cls.getLocalBounds();
+        cls.setOrigin(cb.width/2, 0);
+        cls.setPosition(px + pw/2, py + 32);
+        window.draw(cls);
+
+        sf::RectangleShape div({pw - 20.f, 1.f});
+        div.setPosition(px + 10, py + 52);
+        div.setFillColor(sf::Color(80, 60, 120));
+        window.draw(div);
+
+        struct StatLine { std::string label; std::string value; sf::Color col; };
+        std::vector<StatLine> stats = {
+            {"❤ HP",  std::to_string((int)player.hp) + " / " + std::to_string((int)getTotalStat("hp")), sf::Color(220,80,80)},
+            {"💧 MP",  std::to_string((int)player.mp) + " / " + std::to_string((int)getTotalStat("mp")), sf::Color(80,120,220)},
+            {"⚔ Атака", std::to_string((int)getTotalStat("damage")), sf::Color(200,160,60)},
+            {"🛡 Защита", std::to_string((int)getTotalStat("defense")), sf::Color(100,160,220)},
+            {"STR",  std::to_string(player.str),  sf::Color(220,100,60)},
+            {"AGI",  std::to_string(player.agi),  sf::Color(80,220,120)},
+            {"INT",  std::to_string(player.intel), sf::Color(120,100,240)},
+            {"VIT",  std::to_string(player.vit),  sf::Color(100,200,160)},
+            {"💀 Убийств", std::to_string(player.kills), sf::Color(180,100,100)},
+            {"💰 Золото",  std::to_string(player.gold),  sf::Color(220,185,40)},
+            {"XP",   std::to_string(player.xp) + " / " + std::to_string(player.xpNext), sf::Color(80,200,255)},
+        };
+
+        float sy = py + 60.f;
+        for (auto& sl : stats) {
+            sf::Text lbl, val;
+            lbl.setFont(font); lbl.setString(U(sl.label));
+            lbl.setCharacterSize(13); lbl.setFillColor(sf::Color(140,130,160));
+            lbl.setPosition(px + 14, sy);
+            window.draw(lbl);
+
+            val.setFont(font); val.setString(U(sl.value));
+            val.setCharacterSize(13); val.setFillColor(sl.col);
+            auto vb = val.getLocalBounds();
+            val.setPosition(px + pw - 14 - vb.width, sy);
+            window.draw(val);
+            sy += 24.f;
+        }
+
+        sf::RectangleShape div2({pw - 20.f, 1.f});
+        div2.setPosition(px + 10, sy + 2);
+        div2.setFillColor(sf::Color(80, 60, 120));
+        window.draw(div2);
+        sy += 8.f;
+
+        sf::Text pot; pot.setFont(font);
+        pot.setString(U("🧪 HP Зелья: " + std::to_string(player.hpPotions) +
+                        "   MP: " + std::to_string(player.mpPotions)));
+        pot.setCharacterSize(12); pot.setFillColor(sf::Color(160,200,120));
+        pot.setPosition(px + 14, sy);
+        window.draw(pot);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ОКНО ПЕРСОНАЖА С ЭКИПИРОВКОЙ  [C]
+    // ═══════════════════════════════════════════════════════════
+    void drawCharacterPanel() {
+        if (!fontLoaded) return;
+
+        // ── Размер и позиция окна ────────────────────────────────
+        const float CW = 620.f, CH = 520.f;
+        const float CX = WINDOW_W / 2.f - CW / 2.f;
+        const float CY = WINDOW_H / 2.f - CH / 2.f;
+
+        // Затемнение фона
+        sf::RectangleShape overlay({(float)WINDOW_W, (float)WINDOW_H});
+        overlay.setFillColor(sf::Color(0, 0, 0, 120));
+        window.draw(overlay);
+
+        // Фон панели
+        drawRoundedRect(window, CX, CY, CW, CH,
+            sf::Color(14, 9, 26, 252), sf::Color(130, 85, 195), 2);
+
+        // Заголовок
+        sf::Text title; title.setFont(font);
+        title.setString(U("[ " + player.name + " | " + player.className + " | Ур." + std::to_string(player.level) + " ]"));
+        title.setCharacterSize(16); title.setStyle(sf::Text::Bold);
+        title.setFillColor(sf::Color(220, 185, 80));
+        auto tb = title.getLocalBounds(); title.setOrigin(tb.width/2, 0);
+        title.setPosition(CX + CW/2, CY + 10);
+        window.draw(title);
+
+        // Подсказка
+        sf::Text hint; hint.setFont(font);
+        hint.setString(U("[C] закрыть   клик по слоту — снять вещь"));
+        hint.setCharacterSize(10); hint.setFillColor(sf::Color(90, 80, 120));
+        auto hb = hint.getLocalBounds(); hint.setOrigin(hb.width/2, 0);
+        hint.setPosition(CX + CW/2, CY + 30);
+        window.draw(hint);
+
+        // Разделитель
+        sf::RectangleShape div1({CW - 16.f, 1.f});
+        div1.setPosition(CX + 8, CY + 46);
+        div1.setFillColor(sf::Color(70, 50, 110));
+        window.draw(div1);
+
+        // ─────────────────────────────────────────────────────────
+        // ЛЕВАЯ КОЛОНКА: слоты экипировки (4 слева от манекена)
+        // ─────────────────────────────────────────────────────────
+        const float SS = 54.f;   // размер слота
+        const float SG = 8.f;    // зазор между слотами
+        const float LC = CX + 12.f;   // X левой колонки
+        const float RC = CX + CW - 12.f - SS; // X правой колонки
+
+        // Слоты: left column, right column, bottom row
+        struct SlotDef { std::string slot, label; float x, y; };
+        std::vector<SlotDef> slots = {
+            // Левая колонка (4 слота)
+            {"main_hand", "Оружие",   LC,      CY + 58.f},
+            {"ring1",     "Кольцо 1", LC,      CY + 58.f + (SS+SG)},
+            {"ring2",     "Кольцо 2", LC,      CY + 58.f + (SS+SG)*2},
+            {"legs",      "Сапоги",   LC,      CY + 58.f + (SS+SG)*3},
+            // Правая колонка (4 слота)
+            {"off_hand",  "Щит",      RC,      CY + 58.f},
+            {"head",      "Голова",   RC,      CY + 58.f + (SS+SG)},
+            {"chest",     "Броня",    RC,      CY + 58.f + (SS+SG)*2},
+            {"neck",      "Шея/Ам.",  RC,      CY + 58.f + (SS+SG)*3},
+        };
+
+        for (auto& sd : slots) {
+            std::string eqId;
+            auto it = player.equipped.find(sd.slot);
+            if (it != player.equipped.end()) eqId = it->second;
+            bool filled = !eqId.empty();
+
+            // Рамка слота — заполненный выглядит заметно ярче
+            sf::RectangleShape bg({SS, SS});
+            bg.setPosition(sd.x, sd.y);
+            bg.setFillColor(filled ? sf::Color(65, 40, 100) : sf::Color(18, 12, 32));
+            bg.setOutlineColor(filled ? sf::Color(230, 180, 255) : sf::Color(60, 48, 90));
+            bg.setOutlineThickness(filled ? 2.5f : 1.f);
+            window.draw(bg);
+
+            if (filled) {
+                const ItemDef* def = itemSystem.get(eqId);
+                sf::Color rarCol = def ? rarityColor((int)def->rarity) : sf::Color(160,155,150);
+
+                // Иконка (emoji или аббревиатура)
+                std::string ico = def && !def->icon.empty() ? def->icon
+                    : (eqId.size()>=2 ? eqId.substr(0,2) : eqId);
+                sf::Text it2; it2.setFont(font); it2.setString(U(ico));
+                it2.setCharacterSize(22); it2.setFillColor(rarCol); it2.setStyle(sf::Text::Bold);
+                auto ib = it2.getLocalBounds(); it2.setOrigin(ib.width/2, ib.height/2);
+                it2.setPosition(sd.x + SS/2, sd.y + SS/2 - 4);
+                window.draw(it2);
+
+                // Имя предмета под слотом — UTF-8 безопасное усечение
+                std::string nm = def ? def->name : eqId;
+                // Считаем символы (не байты) для кириллицы
+                auto utf8chars = [](const std::string& s) -> int {
+                    int n = 0;
+                    for (unsigned char c : s) if ((c & 0xC0) != 0x80) n++;
+                    return n;
+                };
+                auto utf8trunc = [](const std::string& s, int maxC) -> std::string {
+                    int chars = 0; size_t i = 0;
+                    while (i < s.size() && chars < maxC) {
+                        unsigned char c = (unsigned char)s[i];
+                        if      ((c & 0x80) == 0)    i += 1;
+                        else if ((c & 0xE0) == 0xC0) i += 2;
+                        else if ((c & 0xF0) == 0xE0) i += 3;
+                        else                          i += 4;
+                        chars++;
+                    }
+                    return s.substr(0, std::min(i, s.size()));
+                };
+                if (utf8chars(nm) > 9) nm = utf8trunc(nm, 8) + "~";
+                sf::Text nt; nt.setFont(font); nt.setString(U(nm));
+                nt.setCharacterSize(8); nt.setFillColor(sf::Color(rarCol.r, rarCol.g, rarCol.b, 200));
+                auto nb2 = nt.getLocalBounds(); nt.setOrigin(nb2.width/2, 0);
+                nt.setPosition(sd.x + SS/2, sd.y + SS + 2);
+                window.draw(nt);
+
+                // Подсказка «клик — снять» в углу слота
+                sf::Text rmv; rmv.setFont(font); rmv.setString("x");
+                rmv.setCharacterSize(9); rmv.setFillColor(sf::Color(200, 100, 100, 180));
+                rmv.setPosition(sd.x + SS - 11, sd.y + 2);
+                window.draw(rmv);
+            } else {
+                // Лейбл пустого слота
+                sf::Text lbl; lbl.setFont(font); lbl.setString(U(sd.label));
+                lbl.setCharacterSize(9); lbl.setFillColor(sf::Color(65, 55, 95));
+                auto lb = lbl.getLocalBounds(); lbl.setOrigin(lb.width/2, lb.height/2);
+                lbl.setPosition(sd.x + SS/2, sd.y + SS/2);
+                window.draw(lbl);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // ЦЕНТР: манекен — реальный idle-спрайт персонажа
+        // ─────────────────────────────────────────────────────────
+        const float DOLL_X = CX + CW/2.f;
+        const float DOLL_Y = CY + 260.f;    // центр по Y
+
+        // Тёмный фон под манекеном
+        sf::RectangleShape dollBg({130.f, 280.f});
+        dollBg.setOrigin(65, 140);
+        dollBg.setPosition(DOLL_X, DOLL_Y);
+        dollBg.setFillColor(sf::Color(20, 14, 36));
+        dollBg.setOutlineColor(sf::Color(70, 50, 110));
+        dollBg.setOutlineThickness(1.f);
+        window.draw(dollBg);
+
+        if (player.animPlayer) {
+            // Создаём временный AnimationPlayer и показываем первый кадр idle
+            // (использует уже загруженную текстуру)
+            AnimationPlayer dollPlayer(animManager);
+            std::string entityKey = "player";  // или по className
+            bool loaded = dollPlayer.playAnimation(entityKey, "idle");
+            if (!loaded) {
+                // fallback — попробуем другие ключи
+                for (auto& key : {"warrior","mage","rogue","paladin","hero"}) {
+                    if (dollPlayer.playAnimation(key, "idle")) { loaded = true; break; }
+                }
+            }
+
+            if (loaded) {
+                // Стоп на первом кадре, масштаб крупнее для манекена
+                dollPlayer.stop();
+                dollPlayer.setScale(2.8f, 2.8f);
+                dollPlayer.setFacing(false);   // смотрит вправо (лицом к игроку)
+                dollPlayer.setPosition(DOLL_X, DOLL_Y);
+                dollPlayer.draw(window);
+            } else {
+                // Если анимации нет — рисуем стилизованный силуэт
+                // Тело
+                sf::RectangleShape torso({38.f, 50.f}); torso.setOrigin(19, 0);
+                torso.setPosition(DOLL_X, DOLL_Y - 50);
+                torso.setFillColor(sf::Color(55, 45, 75));
+                torso.setOutlineColor(sf::Color(90, 70, 130)); torso.setOutlineThickness(1);
+                window.draw(torso);
+                // Голова
+                sf::CircleShape head(20); head.setOrigin(20, 20);
+                head.setPosition(DOLL_X, DOLL_Y - 72);
+                head.setFillColor(sf::Color(190, 160, 120));
+                window.draw(head);
+                // Ноги
+                sf::RectangleShape legs({38.f, 38.f}); legs.setOrigin(19, 0);
+                legs.setPosition(DOLL_X, DOLL_Y);
+                legs.setFillColor(sf::Color(45, 36, 62));
+                legs.setOutlineColor(sf::Color(80, 65, 110)); legs.setOutlineThickness(1);
+                window.draw(legs);
+            }
+        }
+
+        // Имя класса под манекеном
+        sf::Text clsLbl; clsLbl.setFont(font);
+        clsLbl.setString(U(player.className));
+        clsLbl.setCharacterSize(11); clsLbl.setFillColor(sf::Color(160, 140, 200));
+        auto clb = clsLbl.getLocalBounds(); clsLbl.setOrigin(clb.width/2, 0);
+        clsLbl.setPosition(DOLL_X, CY + CH - 44);
+        window.draw(clsLbl);
+
+        // ─────────────────────────────────────────────────────────
+        // НИЖНЯЯ СТРОКА: XP-бар + золото
+        // ─────────────────────────────────────────────────────────
+        float xpRatio = player.xpNext > 0 ? (float)player.xp / player.xpNext : 0.f;
+        drawWorldBar(window, CX + 10, CY + CH - 24, CW - 20, 12, xpRatio, sf::Color(80, 180, 255));
+        sf::Text xpTxt; xpTxt.setFont(font);
+        xpTxt.setString(U("XP: " + std::to_string(player.xp) + " / " + std::to_string(player.xpNext)
+            + "   |   Золото: " + std::to_string(player.gold)));
+        xpTxt.setCharacterSize(10); xpTxt.setFillColor(sf::Color(120, 170, 220));
+        auto xb = xpTxt.getLocalBounds(); xpTxt.setOrigin(xb.width/2, 0);
+        xpTxt.setPosition(CX + CW/2, CY + CH - 24);
+        window.draw(xpTxt);
+
+        // ─────────────────────────────────────────────────────────
+        // ПРАВЕЕ ЦЕНТРА: итоговые статы (в правой половине между
+        // правой колонкой слотов и правым краем правой колонки)
+        // ─────────────────────────────────────────────────────────
+        // Статы рисуем между левой и правой колонками,
+        // справа от манекена
+        float statX = CX + CW/2.f + 80.f;
+        float statY = CY + 58.f;
+
+        sf::Text stHdr; stHdr.setFont(font);
+        stHdr.setString(U("Характеристики"));
+        stHdr.setCharacterSize(12); stHdr.setStyle(sf::Text::Bold);
+        stHdr.setFillColor(sf::Color(170, 150, 215));
+        stHdr.setPosition(statX, statY); window.draw(stHdr);
+        statY += 20.f;
+
+        sf::RectangleShape sdiv({RC - statX - 4, 1.f});
+        sdiv.setPosition(statX, statY); sdiv.setFillColor(sf::Color(60,45,90));
+        window.draw(sdiv);
+        statY += 6.f;
+
+        auto bonusStr = [&](const std::string& key) -> std::string {
+            auto it = player.equipBonuses.find(key);
+            if (it == player.equipBonuses.end() || it->second == 0.f) return "";
+            return " +" + std::to_string((int)it->second);
+        };
+
+        struct SL { std::string lbl, val; sf::Color col; };
+        std::vector<SL> statLines = {
+            {"❤ HP",    std::to_string((int)player.hp)+"/"+std::to_string((int)getTotalStat("hp"))+bonusStr("hp"),    sf::Color(220,80,80)},
+            {"💧 MP",   std::to_string((int)player.mp)+"/"+std::to_string((int)getTotalStat("mp"))+bonusStr("mp"),    sf::Color(80,120,220)},
+            {"⚔ Атака", std::to_string((int)getTotalStat("damage"))+bonusStr("damage"),  sf::Color(220,170,50)},
+            {"🛡 Защита",std::to_string((int)getTotalStat("defense"))+bonusStr("defense"),sf::Color(90,155,220)},
+            {"STR",     std::to_string(player.str),   sf::Color(220,100,60)},
+            {"AGI",     std::to_string(player.agi),   sf::Color(80,220,120)},
+            {"INT",     std::to_string(player.intel),  sf::Color(120,100,240)},
+            {"VIT",     std::to_string(player.vit),   sf::Color(100,200,160)},
+            {"Убийств", std::to_string(player.kills),  sf::Color(180,100,100)},
+        };
+
+        float colW = RC - statX - 4;
+        for (auto& sl : statLines) {
+            sf::Text lv; lv.setFont(font); lv.setString(U(sl.lbl));
+            lv.setCharacterSize(11); lv.setFillColor(sf::Color(110,100,145));
+            lv.setPosition(statX, statY); window.draw(lv);
+
+            sf::Text vv; vv.setFont(font); vv.setString(U(sl.val));
+            vv.setCharacterSize(11); vv.setFillColor(sl.col);
+            auto vb = vv.getLocalBounds();
+            vv.setPosition(statX + colW - vb.width, statY);
+            window.draw(vv);
+            statY += 19.f;
+        }
     }
 
     void drawInventoryPanel(){
         if(!fontLoaded) return;
-        drawRoundedRect(window,20,WINDOW_H-280,260,260,sf::Color(30,20,40),sf::Color(100,80,150),2);
-        sf::Text title; title.setFont(font); title.setString("Inventory");
-        title.setCharacterSize(18); title.setFillColor(sf::Color(200,200,100));
-        title.setPosition(30,WINDOW_H-270); window.draw(title);
+        float px = 16.f, py = WINDOW_H - 340.f, pw = 340.f, ph = 324.f;
+        drawRoundedRect(window, px, py, pw, ph,
+            sf::Color(20, 12, 35, 230), sf::Color(120, 80, 180), 2);
+
+        sf::Text title; title.setFont(font);
+        title.setString(U("[ Инвентарь ]  Tab-закрыть"));
+        title.setCharacterSize(14); title.setStyle(sf::Text::Bold);
+        title.setFillColor(sf::Color(220, 185, 80));
+        title.setPosition(px + 12, py + 8);
+        window.draw(title);
+
+        // Сетка 5×4 слотов
+        const int COLS = 5, ROWS = 4;
+        const float SZ = 48.f, GAP = 6.f;
+        float gridX = px + 12.f, gridY = py + 34.f;
+
+        // Все предметы из bag
+        std::vector<std::pair<std::string, int>> items; // name, count
+        std::vector<std::string> itemIds;
+        for (auto& s : player.bag.slots) {
+            const ItemDef* def = itemSystem.get(s.itemId);
+            items.push_back({def ? def->name : s.itemId, s.count});
+            itemIds.push_back(s.itemId);
+        }
+
+        int slot = 0;
+        for (int row = 0; row < ROWS; row++) {
+            for (int col = 0; col < COLS; col++) {
+                float sx = gridX + col * (SZ + GAP);
+                float sy = gridY + row * (SZ + GAP);
+
+                bool isSelected = (slot == selectedInvSlot);
+
+                sf::RectangleShape bg({SZ, SZ});
+                bg.setPosition(sx, sy);
+                bg.setFillColor(sf::Color(30, 20, 50));
+                bg.setOutlineColor(isSelected ? sf::Color(255,220,50) : sf::Color(70, 55, 100));
+                bg.setOutlineThickness(isSelected ? 2.5f : 1.f);
+                window.draw(bg);
+
+                if (slot < (int)items.size()) {
+                    auto& itm = items[slot];
+                    const ItemDef* def = itemSystem.get(itemIds[slot]);
+                    int rar = def ? (int)def->rarity : 0;
+                    sf::Color rarBorder = rarityColor(rar);
+
+                    sf::RectangleShape filled({SZ, SZ});
+                    filled.setPosition(sx, sy);
+                    filled.setFillColor(sf::Color(40+rar*8, 28+rar*4, 60+rar*6));
+                    filled.setOutlineColor(isSelected ? sf::Color(255,220,50) : rarBorder);
+                    filled.setOutlineThickness(isSelected ? 2.5f : 2.f);
+                    window.draw(filled);
+
+                    // Иконка предмета (emoji или аббревиатура)
+                    std::string icon_str;
+                    if (def && !def->icon.empty()) icon_str = def->icon;
+                    else {
+                        icon_str = itm.first.size() >= 2 ? itm.first.substr(0,2) : itm.first;
+                    }
+                    sf::Text icon; icon.setFont(font);
+                    icon.setString(U(icon_str));
+                    icon.setCharacterSize(18);
+                    icon.setFillColor(rarBorder);
+                    icon.setStyle(sf::Text::Bold);
+                    auto ib = icon.getLocalBounds();
+                    icon.setOrigin(ib.width/2, ib.height/2);
+                    icon.setPosition(sx + SZ/2, sy + SZ/2 - 4);
+                    window.draw(icon);
+
+                    // Стак
+                    if (itm.second > 1) {
+                        sf::Text cnt; cnt.setFont(font);
+                        cnt.setString(std::to_string(itm.second));
+                        cnt.setCharacterSize(10);
+                        cnt.setFillColor(sf::Color(220,220,220));
+                        cnt.setPosition(sx + SZ - 14, sy + SZ - 14);
+                        window.draw(cnt);
+                    }
+
+                    // Пометка «надет»
+                    if (def) {
+                        std::string checkSlot = def->slot;
+                        if (checkSlot.empty()) {
+                            if      (def->type=="weapon")  checkSlot="main_hand";
+                            else if (def->type=="armor")   checkSlot="chest";
+                            else if (def->type=="helmet")  checkSlot="head";
+                            else if (def->type=="boots")   checkSlot="legs";
+                            else if (def->type=="ring")    checkSlot="ring1";
+                        }
+                        auto eqIt = player.equipped.find(checkSlot);
+                        bool worn = (eqIt != player.equipped.end() && eqIt->second == itemIds[slot]);
+                        if (worn) {
+                            sf::Text eq; eq.setFont(font); eq.setString("E");
+                            eq.setCharacterSize(9); eq.setFillColor(sf::Color(100,255,120));
+                            eq.setPosition(sx+2, sy+2);
+                            window.draw(eq);
+                        }
+                    }
+                }
+                slot++;
+            }
+        }
+
+        // Подсказка выбранного предмета + кнопка Надеть
+        float infoY = gridY + ROWS * (SZ + GAP) + 4.f;
+        if (selectedInvSlot >= 0 && selectedInvSlot < (int)player.bag.slots.size()) {
+            const std::string& sid = player.bag.slots[selectedInvSlot].itemId;
+            const ItemDef* def = itemSystem.get(sid);
+            bool canEquip = def && def->type != "consumable" && def->type != "material" && def->type != "quest";
+
+            // Имя предмета + описание
+            if (def) {
+                sf::Text nm; nm.setFont(font);
+                sf::Color rarC = rarityColor((int)def->rarity);
+                nm.setString(U(def->name));
+                nm.setCharacterSize(12); nm.setStyle(sf::Text::Bold);
+                nm.setFillColor(rarC);
+                nm.setPosition(px + 12, infoY);
+                window.draw(nm);
+                infoY += 16.f;
+                if (!def->description.empty()) {
+                    sf::Text ds; ds.setFont(font);
+                    ds.setString(U(def->description));
+                    ds.setCharacterSize(10); ds.setFillColor(sf::Color(160,155,180));
+                    ds.setPosition(px + 12, infoY);
+                    window.draw(ds);
+                    infoY += 14.f;
+                }
+                // Статы
+                for (auto& [k,v] : def->stats) {
+                    if (v == 0.f) continue;
+                    sf::Text st; st.setFont(font);
+                    st.setString(U("  +" + std::to_string((int)v) + " " + k));
+                    st.setCharacterSize(10); st.setFillColor(sf::Color(120,220,120));
+                    st.setPosition(px + 12, infoY);
+                    window.draw(st);
+                    infoY += 12.f;
+                }
+
+                // Ограничение по классу
+                if (!def->allowedClasses.empty()) {
+                    bool canUse = def->canBeUsedBy(player.className);
+                    sf::Text clsT; clsT.setFont(font);
+                    clsT.setString(U(canUse
+                        ? ("✓ " + def->allowedClassesStr())
+                        : ("✗ Только: " + def->allowedClassesStr())));
+                    clsT.setCharacterSize(10);
+                    clsT.setFillColor(canUse ? sf::Color(100,220,120) : sf::Color(255,90,90));
+                    clsT.setStyle(canUse ? sf::Text::Regular : sf::Text::Bold);
+                    clsT.setPosition(px + 12, infoY);
+                    window.draw(clsT);
+                    infoY += 13.f;
+                }
+            }
+
+            // Кнопка Надеть (только для экипируемых)
+            if (canEquip) {
+                bool classOk = def->canBeUsedBy(player.className);
+                float bx = px + 12, by = infoY, bw = 100.f, bh = 22.f;
+                sf::RectangleShape btn({bw, bh});
+                btn.setPosition(bx, by);
+                btn.setFillColor(classOk ? sf::Color(60, 40, 100) : sf::Color(50, 30, 50));
+                btn.setOutlineColor(classOk ? sf::Color(160, 110, 220) : sf::Color(100, 60, 80));
+                btn.setOutlineThickness(1.5f);
+                window.draw(btn);
+                sf::Text bt; bt.setFont(font);
+                bt.setString(U(classOk ? "Надеть [ЛКМ]" : "Не ваш класс"));
+                bt.setCharacterSize(10);
+                bt.setFillColor(classOk ? sf::Color(220, 200, 255) : sf::Color(160, 100, 120));
+                auto bb = bt.getLocalBounds(); bt.setOrigin(bb.width/2, bb.height/2);
+                bt.setPosition(bx + bw/2, by + bh/2);
+                window.draw(bt);
+                infoY += bh + 4.f;
+            }
+        }
+
+        // Золото и зелья
+        sf::Text goldTxt; goldTxt.setFont(font);
+        goldTxt.setString(U("💰 " + std::to_string(player.gold) + " золота"));
+        goldTxt.setCharacterSize(13); goldTxt.setFillColor(sf::Color(220, 185, 40));
+        goldTxt.setPosition(px + 14, infoY);
+        window.draw(goldTxt);
+
+        sf::Text potTxt; potTxt.setFont(font);
+        potTxt.setString(U("🧪 HP:" + std::to_string(player.hpPotions) +
+                           "  MP:" + std::to_string(player.mpPotions) +
+                           "  [7][8]"));
+        potTxt.setCharacterSize(12); potTxt.setFillColor(sf::Color(120, 200, 120));
+        potTxt.setPosition(px + 14, infoY + 18.f);
+        window.draw(potTxt);
     }
 
     void drawMinimap(){
-        drawRoundedRect(window,WINDOW_W-180,WINDOW_H-180,160,160,sf::Color(40,30,50,150),sf::Color(100,80,150),1);
+        const float MW = 180.f, MH = 180.f;
+        float mx = WINDOW_W - MW - 16.f, my = WINDOW_H - MH - 16.f;
+        drawRoundedRect(window, mx, my, MW, MH,
+            sf::Color(15, 10, 28, 200), sf::Color(100, 75, 150), 1);
+
+        // Масштаб: сколько тайлов в мини-карте
+        const float VIEW_TILES = 60.f;  // 60×60 тайлов видно на миникарте
+        float scale = MW / VIEW_TILES;
+
+        // Центр обзора = позиция игрока в тайлах
+        float camTX = player.pos.x / TILE;
+        float camTY = player.pos.y / TILE;
+        float halfT = VIEW_TILES / 2.f;
+
+        // Рисуем тайлы
+        int tStartX = std::max(0,  (int)(camTX - halfT));
+        int tStartY = std::max(0,  (int)(camTY - halfT));
+        int tEndX   = std::min(MAP_W, (int)(camTX + halfT) + 1);
+        int tEndY   = std::min(MAP_H, (int)(camTY + halfT) + 1);
+
+        for (int ty = tStartY; ty < tEndY; ty++) {
+            for (int tx = tStartX; tx < tEndX; tx++) {
+                float sx = mx + (tx - camTX + halfT) * scale;
+                float sy = my + (ty - camTY + halfT) * scale;
+                if (sx < mx || sy < my || sx >= mx+MW || sy >= my+MH) continue;
+                sf::RectangleShape dot({scale + 0.5f, scale + 0.5f});
+                dot.setPosition(sx, sy);
+                sf::Color col;
+                switch (worldMap[ty][tx].type) {
+                    case SceneTileType::WATER:        col = sf::Color(40,100,200); break;
+                    case SceneTileType::WALL:         col = sf::Color(90,80,70);  break;
+                    case SceneTileType::TREE:         col = sf::Color(30,100,30); break;
+                    case SceneTileType::ROAD:         col = sf::Color(160,145,120); break;
+                    case SceneTileType::STONE_FLOOR:  col = sf::Color(110,100,90); break;
+                    case SceneTileType::BUILDING_FLOOR: col = sf::Color(100,85,70); break;
+                    case SceneTileType::GRASS:        col = sf::Color(50,120,40); break;
+                    default:                          col = sf::Color(60,130,50); break;
+                }
+                dot.setFillColor(col);
+                window.draw(dot);
+            }
+        }
+
+        // Враги — красные точки
+        for (auto& e : enemies) {
+            if (e.hp <= 0) continue;
+            float ex = mx + (e.pos.x/TILE - camTX + halfT) * scale;
+            float ey = my + (e.pos.y/TILE - camTY + halfT) * scale;
+            if (ex < mx || ey < my || ex >= mx+MW || ey >= my+MH) continue;
+            sf::RectangleShape dot({3.f, 3.f});
+            dot.setPosition(ex - 1.f, ey - 1.f);
+            dot.setFillColor(e.boss ? sf::Color(255,120,0) : sf::Color(220,50,50));
+            window.draw(dot);
+        }
+
+        // Игрок — белый/жёлтый блип
+        float ppx = mx + halfT * scale;
+        float ppy = my + halfT * scale;
+        sf::CircleShape pip(4, 6);
+        pip.setOrigin(4, 4);
+        pip.setPosition(ppx, ppy);
+        pip.setFillColor(sf::Color(255, 220, 60));
+        pip.setOutlineColor(sf::Color(255,255,255,180));
+        pip.setOutlineThickness(1.f);
+        window.draw(pip);
+
+        // Метка
+        if (fontLoaded) {
+            sf::Text lbl; lbl.setFont(font);
+            lbl.setString(U("Карта [M]"));
+            lbl.setCharacterSize(10);
+            lbl.setFillColor(sf::Color(160, 140, 200, 180));
+            lbl.setPosition(mx + 5, my + 3);
+            window.draw(lbl);
+        }
     }
 
     void renderLoginScreen(){

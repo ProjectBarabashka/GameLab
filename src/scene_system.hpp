@@ -529,7 +529,10 @@ public:
         for (int y=0;y<h;y++) {
             f << "    [";
             for (int x=0;x<w;x++) {
-                f << "\"" << tileTypeToStr(tiles[y][x].type) << "\"";
+                const auto& st = tiles[y][x];
+                // Кастомный тайл — сохраняем его оригинальный ID, а не тип
+                std::string tstr = st.tileId.empty() ? tileTypeToStr(st.type) : st.tileId;
+                f << "\"" << tstr << "\"";
                 if (x<w-1) f << ",";
             }
             f << "]";

@@ -63,9 +63,31 @@ struct ItemDef {
     // stats ключи: "damage","defense","hp","mp","str","dex","int","vit","speed",
     //              "crit_chance","crit_mult","attack_speed","magic_power"
 
+    // Какие классы могут использовать предмет (пусто = все)
+    std::vector<std::string> allowedClasses;
+
     float getStat(const std::string& k) const {
         auto it = stats.find(k);
         return it != stats.end() ? it->second : 0.f;
+    }
+
+    // Может ли класс надеть предмет
+    bool canBeUsedBy(const std::string& cls) const {
+        if (allowedClasses.empty()) return true;
+        for (const auto& c : allowedClasses)
+            if (c == cls) return true;
+        return false;
+    }
+
+    // Строка допустимых классов для тултипа
+    std::string allowedClassesStr() const {
+        if (allowedClasses.empty()) return "Все классы";
+        std::string s;
+        for (const auto& c : allowedClasses) {
+            if (!s.empty()) s += ", ";
+            s += c;
+        }
+        return s;
     }
 };
 
@@ -181,6 +203,17 @@ public:
                 for (auto& [k,v] : s->objectVal)
                     if (v) d.stats[k] = (float)v->asDouble();
             }
+            // Ограничение по классу: "allowed_classes":["Warrior","Mage"]
+            if (auto ac = j->get("allowed_classes")) {
+                d.allowedClasses.clear();
+                if (ac->isArray()) {
+                    for (size_t k2 = 0; k2 < ac->arrayVal.size(); k2++) {
+                        auto cl = ac->get(k2);
+                        if (cl && !cl->asString().empty())
+                            d.allowedClasses.push_back(cl->asString());
+                    }
+                }
+            }
             if (!d.id.empty()) items_[d.id] = d;
         }
         std::cout << "[ItemSystem] Загружено предметов: " << items_.size()
@@ -233,6 +266,14 @@ public:
             f << "\"stack\":"         << d.maxStack          << ",";
             f << "\"value\":"         << d.value             << ",";
             f << "\"description\":\"" << _esc(d.description) << "\",";
+            f << "\"allowed_classes\":[";
+            { bool fc = true;
+              for (const auto& c : d.allowedClasses) {
+                if (!fc) f << ","; fc = false;
+                f << "\"" << _esc(c) << "\"";
+              }
+            }
+            f << "],";
             f << "\"stats\":{";
             bool fs = true;
             for (auto& [k,v] : d.stats) {
@@ -306,20 +347,43 @@ private:
     }
 
     void _createDefaultItems() {
+        // Вспомогательная лямбда — добавить предмет с ограничением по классу
         auto add = [&](const std::string& id, const std::string& name,
                        const std::string& type, int rarity,
-                       std::map<std::string,float> stats, int value) {
+                       std::map<std::string,float> stats, int value,
+                       std::vector<std::string> classes = {}) {
             ItemDef d;
             d.id = id; d.name = name; d.type = type;
-            d.rarity = (ItemRarityLevel)rarity; d.stats = stats; d.value = value;
+            d.rarity = (ItemRarityLevel)rarity;
+            d.stats = stats; d.value = value;
+            d.allowedClasses = classes;
+            // Автоопределение слота
+            if      (type == "weapon")  d.slot = "main_hand";
+            else if (type == "armor")   d.slot = "chest";
+            else if (type == "helmet")  d.slot = "head";
+            else if (type == "boots")   d.slot = "legs";
+            else if (type == "ring")    d.slot = "ring1";
+            else if (type == "amulet")  d.slot = "neck";
+            else if (type == "shield")  d.slot = "off_hand";
             items_[id] = d;
         };
-        add("iron_sword",    "Железный меч",     "weapon",    0, {{"damage",15}},      50);
-        add("leather_armor", "Кожаная броня",     "armor",     0, {{"defense",10}},     40);
-        add("health_potion", "Зелье здоровья",    "consumable",0, {{"hp_restore",100}},  20);
-        add("mana_potion",   "Зелье маны",        "consumable",0, {{"mp_restore",80}},   20);
-        add("goblin_tooth",  "Зуб гоблина",       "material",  0, {},                    5);
-        add("gold_coin",     "Золотая монета",    "material",  0, {},                    1);
+
+        // Оружие — ограничено по классу
+        add("iron_sword",    "Железный меч",   "weapon", 0, {{"damage",15}},       50, {"Warrior","Paladin"});
+        add("staff_oak",     "Дубовый посох",  "weapon", 0, {{"magic_power",20}},  60, {"Mage"});
+        add("daggers_iron",  "Железные клинки","weapon", 0, {{"damage",12},{"crit_chance",0.05f}}, 55, {"Rogue"});
+        add("holy_hammer",   "Священный молот","weapon", 0, {{"damage",13},{"hp",10}}, 65, {"Paladin"});
+
+        // Броня — ограничена по классу
+        add("plate_chest",   "Латный нагрудник","armor", 1, {{"defense",18}},      80, {"Warrior","Paladin"});
+        add("leather_armor", "Кожаная броня",   "armor", 0, {{"defense",10}},      40, {"Warrior","Rogue","Paladin"});
+        add("robe_mage",     "Мантия мага",     "armor", 0, {{"defense",5},{"mp",20}}, 45, {"Mage"});
+
+        // Расходники и материалы — без ограничений
+        add("health_potion", "Зелье здоровья",  "consumable", 0, {{"hp_restore",100}}, 20);
+        add("mana_potion",   "Зелье маны",      "consumable", 0, {{"mp_restore",80}},  20);
+        add("goblin_tooth",  "Зуб гоблина",     "material",   0, {},                    5);
+        add("gold_coin",     "Золотая монета",  "material",   0, {},                    1);
     }
 };
 
