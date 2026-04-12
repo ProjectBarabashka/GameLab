@@ -1,0 +1,207 @@
+[
+  {
+    "id": "q001",
+    "name": "Первые шаги",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "Капитан Грэй",
+    "description": "Гоблины атакуют деревни вокруг Аэториума. Уничтожь их!",
+    "objectives": [
+      {
+        "type": "kill",
+        "target": "GOBLIN",
+        "count": 5,
+        "current": 0
+      }
+    ],
+    "rewards": {
+      "gold_min": 50,
+      "gold_max": 100,
+      "xp": 200,
+      "items": []
+    },
+    "dialogue": {
+      "offer": [
+        "О, путник! Как раз тебя искал!",
+        "Гоблины терроризируют наши форпосты.",
+        "Убей 5 гоблинов — и ты получишь награду!"
+      ],
+      "progress": [
+        "Ты ещё не добил их всех...",
+        "Продолжай, у тебя всё получится!"
+      ],
+      "complete": [
+        "Превосходно! Ты справился!",
+        "Аэтория благодарит тебя!",
+        "Держи заслуженную награду."
+      ]
+    },
+    "active": true
+  },
+  {
+    "id": "q002",
+    "name": "Зелья целителя",
+    "level_req": 2,
+    "type": "collect",
+    "giver_npc": "Жрица Элара",
+    "description": "Мне нужны волчьи клыки для приготовления зелий. Найди их.",
+    "objectives": [
+      {
+        "type": "collect",
+        "target": "Волчий клык",
+        "count": 3,
+        "current": 0
+      }
+    ],
+    "rewards": {
+      "gold_min": 30,
+      "gold_max": 60,
+      "xp": 150,
+      "items": [
+        "Зелье здоровья (среднее)"
+      ]
+    },
+    "dialogue": {
+      "offer": [
+        "Путник, мне нужна твоя помощь.",
+        "Запасы зелий заканчиваются.",
+        "Принеси мне 3 волчьих клыка."
+      ],
+      "progress": [
+        "Клыков пока недостаточно...",
+        "Волки обитают в лесу к северу от города."
+      ],
+      "complete": [
+        "Благодарю тебя!",
+        "Аэтория нуждается в таких людях как ты.",
+        "Вот твоя награда."
+      ]
+    },
+    "active": true
+  },
+  {
+    "id": "q1",
+    "name": "Помочь городу!",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "goblin",
+    "description": "Помоги городу и убей волка",
+    "objectives": [
+      {
+        "type": "kill",
+        "target": "GOBLIN",
+        "count": 5,
+        "current": 0
+      },
+      {
+        "type": "kill",
+        "target": "GOBLIN",
+        "count": 5,
+        "current": 0
+      },
+      {
+        "type": "kill",
+        "target": "GOBLIN",
+        "count": 5,
+        "current": 0
+      },
+      {
+        "type": "kill",
+        "target": "GOBLIN",
+        "count": 5,
+        "current": 0
+      },
+      {
+        "type": "kill",
+        "target": "WOLF",
+        "count": 5,
+        "current": 0
+      },
+      {
+        "type": "kill",
+        "target": "WOLF",
+        "count": 5,
+        "current": 0
+      }
+    ],
+    "rewards": {
+      "gold_min": 10,
+      "gold_max": 50,
+      "xp": 100,
+      "items": [
+        "Железный меч"
+      ]
+    },
+    "dialogue": {
+      "offer": [
+        "...",
+        "Хей друг"
+      ],
+      "progress": [
+        "...",
+        "Приятель принеси дров"
+      ],
+      "complete": [
+        "Отлично!",
+        "вот держи т тебе топор"
+      ]
+    },
+    "active": true
+  },
+  {
+    "id": "q004",
+    "name": "TEST",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "Квестодатель",
+    "description": "TEST",
+    "objectives": [],
+    "rewards": {
+      "gold_min": 10,
+      "gold_max": 50,
+      "xp": 100,
+      "items": []
+    },
+    "dialogue": {
+      "offer": [
+        "..."
+      ],
+      "progress": [
+        "..."
+      ],
+      "complete": [
+        "Отлично!"
+      ]
+    },
+    "active": true
+  },
+  {
+    "id": "q005",
+    "name": "Новый квест",
+    "level_req": 1,
+    "type": "kill",
+    "giver_npc": "",
+    "description": "GOBLINS",
+    "objectives": [],
+    "rewards": {
+      "gold_min": 10,
+      "gold_max": 50,
+      "xp": 100,
+      "items": []
+    },
+    "dialogue": {
+      "offer": [
+        "1111"
+      ],
+      "progress": [
+        "...",
+        "gh"
+      ],
+      "complete": [
+        "Отлично!",
+        "XD"
+      ]
+    },
+    "active": true
+  }
+]
